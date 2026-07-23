@@ -1,0 +1,6 @@
+scripts/experiments/.ZeDPEB_logs/*
+!scripts/experiments/.ZeDPEB_logs/.gitkeep
+!scripts/experiments/.ZeDPEB_logs/saved
+
+.data/*
+!.data/.gitkeep
