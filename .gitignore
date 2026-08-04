@@ -4,3 +4,5 @@ scripts/experiments/.ZeDPEB_logs/*
 
 .data/*
 !.data/.gitkeep
+!.data/DISARM_mods.json
+!.data/llm_additional_requirements.xlsx
