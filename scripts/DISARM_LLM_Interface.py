@@ -5,6 +5,9 @@ import os
 from openai import OpenAI
 from openai import APITimeoutError
 from enum import Enum
+from pathlib import Path
+
+from DISARM_DATA_MASTER import get_mitre_external_id
 
 class Mode(Enum):
     INVESTIGATE = 1 # prompt the model to catch first-hand techniques deployed by the authors of the article content
@@ -14,16 +17,21 @@ TIMEOUT=600
 OPENWEBUI_URL = "https://ai.datagaucho.com"
 VLLM_URL = "http://localhost:8000"
 
+JSON_DATA = Path(__file__).parent.parent / ".data" / "DISARM.json"
+
+
 local_client = OpenAI(
     base_url="http://localhost:8000/v1",
     api_key="EMPTY",
     timeout=TIMEOUT
 )
 
+api_key = os.environ.get("OPENAI_API_KEY")
+
 gpt_client = OpenAI(
-    api_key=os.environ["OPENAI_API_KEY"],   
+    api_key=api_key,
     timeout=TIMEOUT
-)
+) if api_key else None
 
 # SYSTEM PROMPTS
 
@@ -91,13 +99,6 @@ The agent MUST
 The agent should be greedy in it's quote selection: quote anything that would support the classification.
 """
 
-# returns the external_id for a technique
-def get_mitre_external_id(obj):
-    for ref in obj.get("external_references", []):
-        if ref.get("source_name") == "mitre-attack":
-            return ref.get("external_id")
-    return None
-
 class DISARM_LLM:
     def __init__(self,
                  article_content="",
@@ -112,13 +113,13 @@ class DISARM_LLM:
         self.clf_mode = mode
         self.chq_sb_tchnqs = check_sub_techniques
 
-        with open("DISARM.json", "r", encoding="utf-8") as f:
+        with open(JSON_DATA, "r", encoding="utf-8") as f:
             self.disarm_json = json.load(f)
         pass
 
-    def vllm_response(self, model_name, messages, response_format, seed=44):
+    def vllm_response(self, messages, response_format, seed=44):
         response = local_client.chat.completions.create(
-            model=model_name,
+            model=self.MODEL_NAME,
             messages=messages,
             seed=seed,
             response_format=response_format,
@@ -162,13 +163,13 @@ class DISARM_LLM:
         return full_response
 
     
-    def prompt_valid_DISARM_response(self, prompt, system_prompt):
+    def prompt_valid_DISARM_response(self, prompt, system_prompt, response_format):
         # ensure response is JSON
-        result_raw = self.prompt_llm_response(prompt, system_prompt)
+        result_raw = self.prompt_llm_response(prompt, system_prompt, response_format=response_format)
         try:
             result_parsed = json.loads(result_raw)       
-        except json.JSONDecodeError:
-            print("Error: Model Failed to return valid JSON")
+        except json.JSONDecodeError as e:
+            raise ValueError("Model failed to return valid JSON") from e
         # ensure response only contains valid classes
         if self.valid_classifications(result_parsed):
             return result_parsed
@@ -282,7 +283,7 @@ class DISARM_LLM:
         else:
             system_prompt = TA_SYS_RECOG
         
-        self.response_format={
+        response_format={
             "type": "json_schema",
             "json_schema": {
                 "name": "tactics_schema",
@@ -298,7 +299,7 @@ class DISARM_LLM:
 """
         
         print("Identifying Tactics...")
-        ta_result_parsed = self.prompt_valid_DISARM_response(prompt=ta_prompt, system_prompt=system_prompt)
+        ta_result_parsed = self.prompt_valid_DISARM_response(prompt=ta_prompt, system_prompt=system_prompt, response_format=response_format)
         ta_result_list = ta_result_parsed.get("Tactics", [])    
         print("Identified Tactics: " + str(ta_result_list))
         return ta_result_list
@@ -355,7 +356,7 @@ class DISARM_LLM:
         else:
             system_prompt = T_SYS_RECOG
 
-        self.response_format={
+        response_format={
                 "type": "json_schema",
                 "json_schema": {
                     "name": "techniques_schema",
@@ -378,7 +379,7 @@ class DISARM_LLM:
 }}
 """
         try:
-            t_result_parsed = self.prompt_valid_DISARM_response(prompt=t_prompt, system_prompt=system_prompt)
+            t_result_parsed = self.prompt_valid_DISARM_response(prompt=t_prompt, system_prompt=system_prompt, response_format=response_format)
             t_result_list = t_result_parsed.get("Techniques", [])
             results = []
             for t in t_result_list:
@@ -452,3 +453,173 @@ class DISARM_LLM:
         print("\nTotal execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
         self.log_final_result(None,total_techniques, round(time.time() - start_time, 2))
         return total_techniques
+
+def test_interface():
+    test_content = """
+Bushra Bibi led a protest to free Imran Khan - what happened next is a mystery
+Bushra Bibi, wife of jailed former Pakistani Prime Minister Imran Khan, and supporters of Khan's party Pakistan Tehreek-e-Insaf (PTI) attend a rally demanding his release, in Islamabad, Pakistan, November 26, 2024.
+Image source,Reuters
+Image caption,
+Imran Khan's wife, Bushra Bibi, encouraged protesters into the heart of Pakistan's capital, Islamabad
+
+ByFarhat Javed
+BBC News, in Islamabad
+Published
+30 November 2024
+A charred lorry, empty tear gas shells and posters of former Pakistan Prime Minister Imran Khan - it was all that remained of a massive protest led by Khan’s wife, Bushra Bibi, that had sent the entire capital into lockdown.
+
+Just a day earlier, faith healer Bibi - wrapped in a white shawl, her face covered by a white veil - stood atop a shipping container on the edge of the city as thousands of her husband’s devoted followers waved flags and chanted slogans beneath her.
+
+It was the latest protest to flare since Khan, the 72-year-old cricketing icon-turned-politician, was jailed more than a year ago after falling foul of the country's influential military which helped catapult him to power.
+
+“My children and my brothers! You have to stand with me,” Bibi cried on Tuesday afternoon, her voice cutting through the deafening roar of the crowd.
+
+“But even if you don’t,” she continued, “I will still stand firm.
+
+“This is not just about my husband. It is about this country and its leader.”
+
+It was, noted some watchers of Pakistani politics, her political debut.
+
+But as the sun rose on Wednesday morning, there was no sign of Bibi, nor the thousands of protesters who had marched through the country to the heart of the capital, demanding the release of their jailed leader.
+
+While other PMs have fallen out with Pakistan's military in the past, Khan's refusal to stay quiet behind bars is presenting an extraordinary challenge - escalating the standoff and leaving the country deeply divided.
+
+Exactly what happened to the so-called “final march”, and Bibi, when the city went dark is still unclear.
+
+All eyewitnesses like Samia* can say for certain is that the lights went out suddenly, plunging D Chowk, the square where they had gathered, into blackness.
+
+Women and children collect recyclables from the burnt truck used by Bushra Bibi, wife of jailed former Pakistani Prime Minister Imran Khan. The truck is in the middle of a quiet main road
+Image source,Reuters
+Image caption,
+Within a day of arriving, the protesters had scattered - leaving behind Bibi's burnt-out vehicle
+
+As loud screams and clouds of tear gas blanketed the square, Samia describes holding her husband on the pavement, bloodied from a gun shot to his shoulder.
+
+"Everyone was running for their lives," she later told BBC Urdu from a hospital in Islamabad, adding it was "like doomsday or a war".
+
+"His blood was on my hands and the screams were unending.”
+
+But how did the tide turn so suddenly and decisively?
+
+Just hours earlier, protesters finally reached D Chowk late afternoon on Tuesday. They had overcome days of tear gas shelling and a maze of barricaded roads to get to the city centre.
+
+Many of them were supporters and workers of the Pakistan Tehreek-e-Insaf (PTI), the party led by Khan.
+
+He had called for the march from his jail cell, where he has been for more than a year on charges he says are politically motivated.
+
+Now Bibi - his third wife, a woman who had been largely shrouded in mystery and out of public view since their unexpected wedding in 2018 - was leading the charge.
+
+“We won’t go back until we have Khan with us,” she declared as the march reached D Chowk, deep in the heart of Islamabad’s government district.
+
+Hundreds of people make their way along a highway with bushes on either side, and handful of cars in amongst the protesters. Some people hold giant red and green flags. Smoke can be seen rising in the distance.
+Image source,Reuters
+Image caption,
+Thousands had marched for days to reach Islamabad, demanding former Prime Minister Imran Khan be released from jail
+
+Insiders say even the choice of destination - a place where her husband had once led a successful sit in - was Bibi’s, made in the face of other party leader’s opposition, and appeals from the government to choose another gathering point.
+
+Her being at the forefront may have come as a surprise. Bibi, only recently released from prison herself, is often described as private and apolitical. Little is known about her early life, apart from the fact she was a spiritual guide long before she met Khan. Her teachings, rooted in Sufi traditions, attracted many followers - including Khan himself.
+
+Was she making her move into politics - or was her sudden appearance in the thick of it a tactical move to keep Imran Khan’s party afloat while he remains behind bars?
+
+For critics, it was a move that clashed with Imran Khan’s oft-stated opposition to dynastic politics.
+
+There wasn’t long to mull the possibilities.
+
+After the lights went out, witnesses say that police started firing fresh rounds of tear gas at around 21:30 local time (16:30 GMT).
+
+The crackdown was in full swing just over an hour later.
+
+At some point, amid the chaos, Bushra Bibi left.
+
+Videos on social media appeared to show her switching cars and leaving the scene. The BBC couldn’t verify the footage.
+
+By the time the dust settled, her container had already been set on fire by unknown individuals.
+
+By 01:00 authorities said all the protesters had fled.
+
+Policemen stand guard at the Red Zone area after security forces conducted an overnight operation against the supporters of jailed former prime minister Imran Khan's Pakistan Tehreek-e-Insaf (PTI) party during a protest for the release of Imran Khan, early in Islamabad on November 27, 2024.
+Image source,Getty Images
+Image caption,
+Security was tight in the city, and as night fell, lights were switched off - leaving many in the dark as to what exactly happened next
+
+Eyewitnesses have described scenes of chaos, with tear gas fired and police rounding up protesters.
+
+One, Amin Khan, said from behind an oxygen mask that he joined the march knowing that, "either I will bring back Imran Khan or I will be shot".
+
+The authorities have have denied firing at the protesters. They also said some of the protesters were carrying firearms.
+
+The BBC has seen hospital records recording patients with gunshot injuries.
+
+However, government spokesperson Attaullah Tarar told the BBC that hospitals had denied receiving or treating gunshot wound victims.
+
+He added that "all security personnel deployed on the ground have been forbidden" from having live ammunition during protests.
+
+But one doctor told BBC Urdu that he had never done so many surgeries for gunshot wounds in a single night.
+
+"Some of the injured came in such critical condition that we had to start surgery right away instead of waiting for anaesthesia," he said.
+
+While there has been no official toll released, the BBC has confirmed with local hospitals that at least five people have died.
+
+Police say at least 500 protesters were arrested that night and are being held in police stations. The PTI claims some people are missing.
+
+And one person in particular hasn’t been seen in days: Bushra Bibi.
+
+Municipal workers clean the street leading to Red Zone area next to damaged vehicles after an overnight security forces operation against the supporters of jailed former prime minister Imran Khan's Pakistan Tehreek-e-Insaf (PTI) party in Islamabad on November 27, 2024. 
+Image source,Getty Images
+Image caption,
+The next morning, the protesters were gone - leaving behind just wrecked cars and smashed glass
+
+“She abandoned us,” said one PTI supporter.
+
+Others defended her. “It wasn’t her fault,” insisted another. “She was forced to leave by the party leaders.”
+
+Political commentators have been more scathing.
+
+“Her exit damaged her political career before it even started,” said Mehmal Sarfraz, a journalist and analyst.
+
+But was that even what she wanted?
+
+Khan has previously dismissed any thought his wife might have her own political ambitions - “she only conveys my messages,” he said in a statement attributed to him on his X account.
+
+Bushra Bibi and Imran Khan are shielded by a white sheet as they arrive at a courthouse. Bibi has turned to look at the camera, her hair is covered so is her nose and mouth.
+Image source,EPA
+Image caption,
+Imran Khan and Bushra Bibi, pictured here arriving at court in May 2023, married in 2018
+
+Speaking to BBC Urdu, analyst Imtiaz Gul calls her participation “an extraordinary step in extraordinary circumstances".
+
+Gul believes Bushra Bibi’s role today is only about “keeping the party and its workers active during Imran Khan’s absence”.
+
+It is a feeling echoed by some PTI members, who believe she is “stepping in only because Khan trusts her deeply”.
+
+Insiders, though, had often whispered that she was pulling the strings behind the scenes - advising her husband on political appointments and guiding high-stakes decisions during his tenure.
+
+A more direct intervention came for the first time earlier this month, when she urged a meeting of PTI leaders to back Khan’s call for a rally.
+
+Pakistan’s defence minister Khawaja Asif accused her of “opportunism”, claiming she sees “a future for herself as a political leader”.
+
+But Asma Faiz, an associate professor of political science at Lahore University of Management Sciences, suspects the PTI’s leadership may have simply underestimated Bibi.
+
+“It was assumed that there was an understanding that she is a non-political person, hence she will not be a threat,” she told the AFP news agency.
+
+“However, the events of the last few days have shown a different side of Bushra Bibi.”
+
+But it probably doesn’t matter what analysts and politicians think. Many PTI supporters still see her as their connection to Imran Khan. It was clear her presence was enough to electrify the base.
+
+“She is the one who truly wants to get him out,” says Asim Ali, a resident of Islamabad. “I trust her. Absolutely!”
+"""
+    llm = DISARM_LLM(
+        article_content=test_content,
+        model_name="google/gemma-4-26B-A4B-it",
+        local_model=True,
+        mode=Mode.RECOGNISE,
+        check_sub_techniques=True
+    )
+
+    _, techniques = llm.batch_clf()
+
+    print(techniques)
+
+if __name__ == "__main__":
+    test_interface()

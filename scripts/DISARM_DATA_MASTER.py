@@ -2,6 +2,17 @@
 import pandas as pd
 import numpy as np
 import os
+
+# Helper methods
+
+# get external id given a technique JSON object 
+def get_mitre_external_id(obj):
+    for ref in obj.get("external_references", []):
+        if ref.get("source_name") == "mitre-attack":
+            return ref.get("external_id")
+    return None
+
+
 class DISARMDataMaster:
     
     def __init__(self, 
