@@ -28,10 +28,13 @@ local_client = OpenAI(
 
 api_key = os.environ.get("OPENAI_API_KEY")
 
+print("API key exists:", api_key is not None)
+print("API key length:", len(api_key) if api_key else 0)
+
 gpt_client = OpenAI(
     api_key=api_key,
     timeout=TIMEOUT
-) if api_key else None
+)
 
 # SYSTEM PROMPTS
 
@@ -56,7 +59,65 @@ The agent MUST respond with the following JSON format:
 }
 """
 
-TA_SYS_INVEST = """""" + TA_SYS_FORMAT # TODO!!
+TA_SYS_INVEST = """
+# DISARM Disinformation tactic Classification
+
+The AI assistant identifies DISARM disinformation tactics used by the **author or publisher of the analysed media content**.
+
+When processing an article, select applicable tactics from the predefined options.
+
+## Core Rule
+
+Only classify a tactic when the **author or publisher themselves performs, facilitates, or directly contributes to the behaviour represented by that tactic**.
+
+Do **not** classify a tactic merely because the article:
+
+* Describes another actor using the tactic.
+* Quotes or reports another actor's disinformation.
+* Analyses or discusses a disinformation campaign.
+* Contains information that was itself produced using a DISARM tactic by another actor.
+
+The classification target is:
+
+> **What DISARM tactics did the author/publisher use to create, manipulate, amplify, or distribute disinformation?**
+
+Not:
+
+> **What DISARM tactics are mentioned or attributed to actors in the article?**
+
+## Attribution
+
+For each candidate tactic, determine:
+
+* **Who** performed the behaviour?
+* **What** did they do?
+* **Does the behaviour correspond to the tactic?**
+* **Is there sufficient evidence to attribute it to the author/publisher?**
+
+For example, if an article reports that Actor X fabricated information, do not classify the fabrication tactic unless the author/publisher also fabricated, promoted, or otherwise directly used that fabricated information in a way that constitutes the tactic.
+
+Quoting a false claim does not automatically constitute use of the tactic. However, if the author presents, manipulates, reframes, amplifies, or distributes the claim in a manner that itself constitutes a DISARM tactic, it may be classified.
+
+## Classification Rules
+
+* Multiple tactics may be selected when the author/publisher uses multiple tactics.
+* Do not infer tactic usage solely from the presence of disinformation or a tactic within the article.
+* If attribution is ambiguous or insufficiently supported, **do not classify the tactic**.
+* Prefer false negatives over incorrectly attributing a tactic to the author/publisher.
+* If no applicable tactics are used by the author/publisher, return no tactics.
+
+### Final Decision Rule
+
+For every candidate tactic, ask:
+
+> **Did the author/publisher perform this behaviour, or did they merely report that someone else performed it?**
+
+**Author/publisher performed it → classify.**
+**Another actor performed it → do not classify.**
+**Author merely reported, quoted, or analysed it → do not classify.**
+**Attribution is uncertain → do not classify.**
+
+""" + TA_SYS_FORMAT # TODO!!
 TA_SYS_RECOG = """
 The AI assistant has been designed to understand and categorize user input by the given Tactics. 
 When processing user input, the assistant must predict the Tactics from one of the pre-defined options specified. 
@@ -65,7 +126,65 @@ the assistant should print nothing, indicating that the input does not align wit
 The user input will be in the following format:
 """ + TA_SYS_FORMAT
 
-T_SYS_INVEST = """""" + T_SYS_FORMAT # TODO!!
+T_SYS_INVEST = """
+# DISARM Disinformation Technique Classification
+
+The AI assistant identifies DISARM disinformation techniques used by the **author or publisher of the analysed media content**.
+
+When processing an article, select applicable techniques from the predefined options.
+
+## Core Rule
+
+Only classify a technique when the **author or publisher themselves performs, facilitates, or directly contributes to the behaviour represented by that technique**.
+
+Do **not** classify a technique merely because the article:
+
+* Describes another actor using the technique.
+* Quotes or reports another actor's disinformation.
+* Analyses or discusses a disinformation campaign.
+* Contains information that was itself produced using a DISARM technique by another actor.
+
+The classification target is:
+
+> **What DISARM techniques did the author/publisher use to create, manipulate, amplify, or distribute disinformation?**
+
+Not:
+
+> **What DISARM techniques are mentioned or attributed to actors in the article?**
+
+## Attribution
+
+For each candidate technique, determine:
+
+* **Who** performed the behaviour?
+* **What** did they do?
+* **Does the behaviour correspond to the technique?**
+* **Is there sufficient evidence to attribute it to the author/publisher?**
+
+For example, if an article reports that Actor X fabricated information, do not classify the fabrication technique unless the author/publisher also fabricated, promoted, or otherwise directly used that fabricated information in a way that constitutes the technique.
+
+Quoting a false claim does not automatically constitute use of the technique. However, if the author presents, manipulates, reframes, amplifies, or distributes the claim in a manner that itself constitutes a DISARM technique, it may be classified.
+
+## Classification Rules
+
+* Multiple techniques may be selected when the author/publisher uses multiple techniques.
+* Do not infer technique usage solely from the presence of disinformation or a technique within the article.
+* If attribution is ambiguous or insufficiently supported, **do not classify the technique**.
+* Prefer false negatives over incorrectly attributing a technique to the author/publisher.
+* If no applicable techniques are used by the author/publisher, return no techniques.
+
+### Final Decision Rule
+
+For every candidate technique, ask:
+
+> **Did the author/publisher perform this behaviour, or did they merely report that someone else performed it?**
+
+**Author/publisher performed it → classify.**
+**Another actor performed it → do not classify.**
+**Author merely reported, quoted, or analysed it → do not classify.**
+**Attribution is uncertain → do not classify.**
+ 
+""" + T_SYS_FORMAT # TODO!!
 T_SYS_RECOG = """
 The AI assistant has been designed to understand and categorize user input by the given techniques. When processing user input, the assistant must predict the techniques from one of the pre-defined options specified. It is essential to note that an article may have multiple Techniques associated. If the user input is not relevant to any techniques, the assistant should print nothing, indicating that the input does not align with the available categories. 
 The user input will be in the following format:
@@ -127,40 +246,43 @@ class DISARM_LLM:
         )
         return response
 
-    def chatGPT_response(self, messages, response_format, seed=44):
-        response = gpt_client.chat.completions.create(
+    def chatGPT_response(self, input, system_prompt, tools, response_format):
+        response = gpt_client.responses.create(
                 model = self.MODEL_NAME,
-                messages=messages,
-                seed=seed,
-                response_format=response_format,
+                input=input,
+                instructions=system_prompt,
+                tools=tools, #TODO add tools functionality
+                text=response_format,
                 timeout=TIMEOUT
             )
         return response
 
-    def prompt_llm_response(self, prompt, system_prompt=None, messages = None, response_format=None):
+    def prompt_llm_response(self, prompt, system_prompt=None, messages = None, response_format=None, tools=None):
         start_time = time.time()
         print(f"{self.MODEL_NAME} thinking...")
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-
         if self.local_model:
+            messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ]
             response = self.vllm_response(messages=messages, response_format=response_format)
+            output = response.choices[0].message.content
         else:
-            response = self.chatGPT_response(messages=messages, response_format=response_format)
+            response = self.chatGPT_response(
+                input=prompt,
+                system_prompt=system_prompt,
+                tools=tools,
+                response_format=response_format
+            )
+            output = response.output_text
 
-        full_response = ""
-
-        # for non-streaming use
-        full_response = response.choices[0].message.content
-        print(full_response)
+        print(output)
 
         print()
         print("\nDone in", round(time.time() - start_time, 2), "seconds")
 
-        return full_response
+        return output
 
     
     def prompt_valid_DISARM_response(self, prompt, system_prompt, response_format):
@@ -282,14 +404,23 @@ class DISARM_LLM:
             system_prompt = TA_SYS_INVEST
         else:
             system_prompt = TA_SYS_RECOG
-        
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "tactics_schema",
-                "schema": ta_format
+
+        if self.local_model:
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "tactics_schema",
+                    "schema": ta_format
+                    }
                 }
-            }
+        else:
+            response_format={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "tactics_schema",
+                        "schema": ta_format
+                    }
+                }
 
         ta_prompt = f"""
 {{
@@ -347,7 +478,8 @@ class DISARM_LLM:
                     }
                 }
             },
-            "required": ["Techniques"]
+            "required": ["Techniques"],
+            "additionalProperties": False
         }
         
         # alter the system prompt depending on mode
@@ -356,13 +488,23 @@ class DISARM_LLM:
         else:
             system_prompt = T_SYS_RECOG
 
-        response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "techniques_schema",
-                    "schema": t_format
+        if self.local_model:
+            response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "techniques_schema",
+                        "schema": t_format
+                        }
                     }
-                }
+        else:
+            response_format={
+                    "format": {
+                            "type": "json_schema",
+                            "name": "techniques_schema",
+                            "schema": t_format
+                        }
+                    }   
+
         # if it is a select_all setting, then swap the prompt structure to use prefix caching
         if select_all:
             t_prompt = f"""
@@ -427,7 +569,6 @@ class DISARM_LLM:
 
         print("Total Identified Techniques: " + str(total_techniques))
         print("\nTotal execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
-        self.log_final_result(tactics,total_techniques, round(time.time() - start_time, 2))
         return tactics, total_techniques
 
     # uses select_all_clf architecture to identify all tecnhiques in a single prompts
@@ -609,11 +750,19 @@ But it probably doesn’t matter what analysts and politicians think. Many PTI s
 
 “She is the one who truly wants to get him out,” says Asim Ali, a resident of Islamabad. “I trust her. Absolutely!”
 """
+    # llm = DISARM_LLM(
+    #     article_content=test_content,
+    #     model_name="gpt-5.6-luna",
+    #     local_model=False,
+    #     mode=Mode.RECOGNISE,
+    #     check_sub_techniques=True
+    # )
+
     llm = DISARM_LLM(
         article_content=test_content,
         model_name="google/gemma-4-26B-A4B-it",
         local_model=True,
-        mode=Mode.RECOGNISE,
+        mode=Mode.INVESTIGATE,
         check_sub_techniques=True
     )
 
