@@ -7,7 +7,7 @@ from openai import APITimeoutError
 from enum import Enum
 from pathlib import Path
 
-from DISARM_DATA_MASTER import get_mitre_external_id, is_sub_tech, get_parent_extended_desc
+from DISARM_DATA_MASTER import get_mitre_external_id, is_sub_tech, get_parent_extended_desc, get_additional_llm_requirements
 
 class Mode(Enum):
     INVESTIGATE = 1 # prompt the model to catch first-hand techniques deployed by the authors of the article content
@@ -117,7 +117,7 @@ For every candidate tactic, ask:
 **Author merely reported, quoted, or analysed it → do not classify.**
 **Attribution is uncertain → do not classify.**
 
-""" + TA_SYS_FORMAT # TODO!!
+""" + TA_SYS_FORMAT
 TA_SYS_RECOG = """
 The AI assistant has been designed to understand and categorize user input by the given Tactics. 
 When processing user input, the assistant must predict the Tactics from one of the pre-defined options specified. 
@@ -184,7 +184,7 @@ For every candidate technique, ask:
 **Author merely reported, quoted, or analysed it → do not classify.**
 **Attribution is uncertain → do not classify.**
  
-""" + T_SYS_FORMAT # TODO!!
+""" + T_SYS_FORMAT 
 T_SYS_RECOG = """
 The AI assistant has been designed to understand and categorize user input by the given techniques. When processing user input, the assistant must predict the techniques from one of the pre-defined options specified. It is essential to note that an article may have multiple Techniques associated. If the user input is not relevant to any techniques, the assistant should print nothing, indicating that the input does not align with the available categories. 
 The user input will be in the following format:
@@ -225,14 +225,14 @@ class DISARM_LLM:
                  local_model=True,
                  mode=Mode.INVESTIGATE,
                  check_sub_techniques=True,
-                 log_prompts=False
+                 debug_log=False
                  ):
         self.article_content = article_content
         self.MODEL_NAME = model_name
         self.local_model = local_model
         self.clf_mode = mode
         self.chq_sb_tchnqs = check_sub_techniques
-        self.log_prompts = log_prompts
+        self.debug_log = debug_log
 
         with open(JSON_DATA, "r", encoding="utf-8") as f:
             self.disarm_json = json.load(f)
@@ -252,7 +252,7 @@ class DISARM_LLM:
                 model = self.MODEL_NAME,
                 input=input,
                 instructions=system_prompt,
-                tools=tools, #TODO add tools functionality
+                tools=tools, 
                 text=response_format,
                 timeout=TIMEOUT
             )
@@ -261,7 +261,7 @@ class DISARM_LLM:
     def prompt_llm_response(self, prompt, system_prompt=None, messages = None, response_format=None, tools=None):
         start_time = time.time()
 
-        if self.log_prompts:
+        if self.debug_log:
             print(f"System Prompt: {system_prompt}")
             print(f"Prompt: {prompt}")
 
@@ -294,9 +294,9 @@ class DISARM_LLM:
         return output
 
     
-    def prompt_valid_DISARM_response(self, prompt, system_prompt, response_format):
+    def prompt_valid_DISARM_response(self, prompt, system_prompt, response_format, tools=None):
         # ensure response is JSON
-        result_raw = self.prompt_llm_response(prompt, system_prompt, response_format=response_format)
+        result_raw = self.prompt_llm_response(prompt, system_prompt, response_format=response_format, tools=tools)
         try:
             result_parsed = json.loads(result_raw)       
         except json.JSONDecodeError as e:
@@ -475,7 +475,20 @@ class DISARM_LLM:
                 })
                 external_ids.append(ex_id_token)
 
+        if self.clf_mode == Mode.INVESTIGATE:
+            required_tools = get_additional_llm_requirements(external_ids)
+            
+            tools = (
+                [{"type": "web_search"}]
+                if "Internet/OSINT access" in required_tools
+                else []
+            )
 
+            if self.debug_log:
+                print(f"Additional LLM requirements for {external_ids}: {required_tools}")
+                print(f"Tools provided to model: {tools}")
+        else:
+            tools = None
         self.available_classes = external_ids
 
         t_format = {
@@ -532,7 +545,7 @@ class DISARM_LLM:
 }}
 """
         try:
-            t_result_parsed = self.prompt_valid_DISARM_response(prompt=t_prompt, system_prompt=system_prompt, response_format=response_format)
+            t_result_parsed = self.prompt_valid_DISARM_response(prompt=t_prompt, system_prompt=system_prompt, response_format=response_format, tools=tools)
             t_result_list = t_result_parsed.get("Techniques", [])
             results = []
             for t in t_result_list:
@@ -761,22 +774,23 @@ But it probably doesn’t matter what analysts and politicians think. Many PTI s
 
 “She is the one who truly wants to get him out,” says Asim Ali, a resident of Islamabad. “I trust her. Absolutely!”
 """
-    # llm = DISARM_LLM(
-    #     article_content=test_content,
-    #     model_name="gpt-5.6-luna",
-    #     local_model=False,
-    #     mode=Mode.RECOGNISE,
-    #     check_sub_techniques=True
-    # )
-
     llm = DISARM_LLM(
         article_content=test_content,
-        model_name="google/gemma-4-26B-A4B-it",
-        local_model=True,
+        model_name="gpt-5.6-luna",
+        local_model=False,
         mode=Mode.INVESTIGATE,
         check_sub_techniques=False,
-        log_prompts=True
+        debug_log=True
     )
+
+    # llm = DISARM_LLM(
+    #     article_content=test_content,
+    #     model_name="google/gemma-4-26B-A4B-it",
+    #     local_model=True,
+    #     mode=Mode.INVESTIGATE,
+    #     check_sub_techniques=False,
+    #     debug_log=True
+    # )
 
     _, techniques = llm.batch_clf()
 

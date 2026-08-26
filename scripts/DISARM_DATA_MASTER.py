@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import os
+import json
 from pathlib import Path
 from openpyxl import load_workbook
 
@@ -27,8 +28,26 @@ def get_parent_extended_desc(external_id):
         col_f = ws[f"F{row}"].value
         if col_a == external_id:
             return col_f if col_f is not None else ""
-    print(f"Warning: No extended description found for {external_id}")
+    print(f"Warning: No record found for {external_id} in {ADD_REQUIREMENTS_FILE}")
     return None
+
+def get_additional_llm_requirements(external_ids: list):
+    wb = load_workbook(ADD_REQUIREMENTS_FILE)
+    ws = wb.active
+
+    requirements = []
+    for row in range(2, ws.max_row + 1):
+        col_a = ws[f"A{row}"].value
+        col_e = ws[f"E{row}"].value
+        if col_a in external_ids:
+            if col_e is not None:
+                rqs =  json.loads(col_e)
+                # add to requiremts list if not already in requirements list
+                for rq in rqs:
+                    if rq not in requirements:
+                        requirements.append(rq)
+
+    return requirements
 
 # for incidents database
 class DISARMDataMaster:
