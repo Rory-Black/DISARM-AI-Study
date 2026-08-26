@@ -2,6 +2,10 @@
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
+from openpyxl import load_workbook
+
+ADD_REQUIREMENTS_FILE = Path(__file__).parent.parent / ".data" / "llm_additional_requirements.xlsx"
 
 # Helper methods
 
@@ -12,7 +16,21 @@ def get_mitre_external_id(obj):
             return ref.get("external_id")
     return None
 
+def is_sub_tech(external_id):
+    return '.' in external_id
 
+def get_parent_extended_desc(external_id):
+    wb = load_workbook(ADD_REQUIREMENTS_FILE)
+    ws = wb.active
+    for row in range(2, ws.max_row + 1):
+        col_a = ws[f"A{row}"].value
+        col_f = ws[f"F{row}"].value
+        if col_a == external_id:
+            return col_f if col_f is not None else ""
+    print(f"Warning: No extended description found for {external_id}")
+    return None
+
+# for incidents database
 class DISARMDataMaster:
     
     def __init__(self, 

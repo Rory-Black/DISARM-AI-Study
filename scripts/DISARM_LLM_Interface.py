@@ -7,7 +7,7 @@ from openai import APITimeoutError
 from enum import Enum
 from pathlib import Path
 
-from DISARM_DATA_MASTER import get_mitre_external_id
+from DISARM_DATA_MASTER import get_mitre_external_id, is_sub_tech, get_parent_extended_desc
 
 class Mode(Enum):
     INVESTIGATE = 1 # prompt the model to catch first-hand techniques deployed by the authors of the article content
@@ -224,17 +224,18 @@ class DISARM_LLM:
                  model_name="",
                  local_model=True,
                  mode=Mode.INVESTIGATE,
-                 check_sub_techniques=True
+                 check_sub_techniques=True,
+                 log_prompts=False
                  ):
         self.article_content = article_content
         self.MODEL_NAME = model_name
         self.local_model = local_model
         self.clf_mode = mode
         self.chq_sb_tchnqs = check_sub_techniques
+        self.log_prompts = log_prompts
 
         with open(JSON_DATA, "r", encoding="utf-8") as f:
             self.disarm_json = json.load(f)
-        pass
 
     def vllm_response(self, messages, response_format, seed=44):
         response = local_client.chat.completions.create(
@@ -259,7 +260,15 @@ class DISARM_LLM:
 
     def prompt_llm_response(self, prompt, system_prompt=None, messages = None, response_format=None, tools=None):
         start_time = time.time()
+
+        if self.log_prompts:
+            print(f"System Prompt: {system_prompt}")
+            print(f"Prompt: {prompt}")
+
         print(f"{self.MODEL_NAME} thinking...")
+
+        if self.available_classes is not None:
+            print("Available Classes: " + str(self.available_classes))
 
         if self.local_model:
             messages = [
@@ -448,19 +457,21 @@ class DISARM_LLM:
         external_ids = []
         for technique in techniques:
             ex_id = get_mitre_external_id(technique)
+            description = technique.get("name") + f"\n" + technique.get("description")
+
+            # if not testing for sub-techniques then get updated parent technique description
+            if not self.chq_sb_tchnqs:
+                if is_sub_tech(ex_id):
+                    continue
+                description += get_parent_extended_desc(ex_id)
+
             ex_id_token = ex_id.replace('.','d',1) #tokenised form to stop separate tokens at the '.'
 
-            if filter_ids is None:
-                filtered_techniques.append({
-                    "external_id": ex_id_token,
-                    "description": technique.get("description"),
-                })
-                external_ids.append(ex_id_token)
-            elif ex_id in filter_ids:
+            if filter_ids is None or ex_id in filter_ids:
                 # filtering for use within reduced single clf in the ZeDPEB benchmark
                 filtered_techniques.append({
                     "external_id": ex_id_token,
-                    "description": technique.get("description"),
+                    "description": description,
                 })
                 external_ids.append(ex_id_token)
 
@@ -763,7 +774,8 @@ But it probably doesn’t matter what analysts and politicians think. Many PTI s
         model_name="google/gemma-4-26B-A4B-it",
         local_model=True,
         mode=Mode.INVESTIGATE,
-        check_sub_techniques=True
+        check_sub_techniques=False,
+        log_prompts=True
     )
 
     _, techniques = llm.batch_clf()
