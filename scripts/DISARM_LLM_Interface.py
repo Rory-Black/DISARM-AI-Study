@@ -190,6 +190,33 @@ The AI assistant has been designed to understand and categorize user input by th
 The user input will be in the following format:
 """ + T_SYS_FORMAT
 
+EVIDENCE_SYS_PROMPT = """
+# DISARM Technique Evidence Gathering
+
+The AI assistant is investigating an article on behalf of a later classification step, to gather evidence for a set of candidate DISARM disinformation techniques that cannot be assessed from the article text alone (e.g. verifying whether a claim is actually false, whether an image is fabricated, whether an account or actor is inauthentic, whether an event was staged).
+
+For each candidate technique, use the web_search tool to research the specific claims, entities, images, or events referenced in the article that are relevant to that technique. The assistant should search as many times as needed to reach a confident, well-sourced answer.
+
+The assistant is investigating, not deciding. Do NOT classify whether the technique applies - only report the factual findings and their sources so a separate step can make that decision.
+
+The user input will be in the following format:
+{
+    "Article": "article text",
+    "Techniques": [{"external_id": "external_id", "description": "technique description"}]
+}
+The agent MUST respond with the following JSON format:
+{
+  "evidence": [
+    {
+      "external_id": "external_id",
+      "findings": "concise summary of what was found, including whether it supports or refutes the technique applying",
+      "sources": ["url1", "url2"]
+    }
+  ]
+}
+The agent MUST return one evidence object per technique given, even if no additional evidence could be found (state that explicitly in findings).
+"""
+
 T_RAT_SYSTEM_PROMPT = """
 The AI assistant has been designed to understand and categorize user input by the given techniques. 
 When processing user input, for each technique given by the user, the assistant must select quotes from the article that represent the rationale behind each technique classification. 
@@ -444,6 +471,75 @@ class DISARM_LLM:
         print("Identified Tactics: " + str(ta_result_list))
         return ta_result_list
 
+    # agentic evidence-gathering step for techniques that require external/OSINT knowledge
+    # runs a web_search-equipped agent to research the article's claims BEFORE any classification
+    # decision is made, so the final classification call can decide from grounded evidence
+    # rather than needing live tool access itself
+    def gather_evidence(self, techniques_needing_evidence):
+        if not techniques_needing_evidence:
+            return None
+
+        evidence_format = {
+            "type": "object",
+            "properties": {
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "external_id": {"type": "string"},
+                            "findings": {"type": "string"},
+                            "sources": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
+                        },
+                        "required": ["external_id", "findings", "sources"],
+                        "additionalProperties": False
+                    }
+                }
+            },
+            "required": ["evidence"],
+            "additionalProperties": False
+        }
+        response_format = {
+            "format": {
+                "type": "json_schema",
+                "name": "evidence_schema",
+                "schema": evidence_format
+            }
+        }
+
+        evidence_prompt = f"""
+{{
+"Article": {json.dumps(self.article_content)},
+"Techniques": {json.dumps(techniques_needing_evidence, indent=2)}
+}}
+"""
+        if self.debug_log:
+            print(f"Evidence System Prompt: {EVIDENCE_SYS_PROMPT}")
+            print(f"Evidence Prompt: {evidence_prompt}")
+
+        print("Gathering evidence for techniques requiring external knowledge...")
+        start_time = time.time()
+
+        response = self.chatGPT_response(
+            input=evidence_prompt,
+            system_prompt=EVIDENCE_SYS_PROMPT,
+            tools=[{"type": "web_search"}],
+            response_format=response_format
+        )
+        output = response.output_text
+        print(output)
+        print("\nEvidence gathering done in", round(time.time() - start_time, 2), "seconds")
+
+        try:
+            evidence_parsed = json.loads(output)
+        except json.JSONDecodeError as e:
+            raise ValueError("Model failed to return valid JSON for evidence gathering") from e
+
+        return evidence_parsed.get("evidence", [])
+
     # prompts the model to label the article with the provided techniques
     # leave techniques param empty to use select_all clf
     def identify_techniques(self, techniques=None, filter_ids=None):
@@ -455,6 +551,7 @@ class DISARM_LLM:
         filtered_techniques = []
 
         external_ids = []
+        techniques_needing_evidence = []
         for technique in techniques:
             ex_id = get_mitre_external_id(technique)
             description = technique.get("name") + f"\n" + technique.get("description")
@@ -469,27 +566,42 @@ class DISARM_LLM:
 
             if filter_ids is None or ex_id in filter_ids:
                 # filtering for use within reduced single clf in the ZeDPEB benchmark
-                filtered_techniques.append({
+                tech_entry = {
                     "external_id": ex_id_token,
                     "description": description,
-                })
+                }
+                filtered_techniques.append(tech_entry)
                 external_ids.append(ex_id_token)
 
-        if self.clf_mode == Mode.INVESTIGATE:
-            required_tools = get_additional_llm_requirements(external_ids)
-            
-            tools = (
-                [{"type": "web_search"}]
-                if "Internet/OSINT access" in required_tools
-                else []
-            )
+                # web_search-based evidence gathering is only wired up for the non-local (OpenAI) path
+                if self.clf_mode == Mode.INVESTIGATE and not self.local_model:
+                    if "Internet/OSINT access" in get_additional_llm_requirements([ex_id]):
+                        techniques_needing_evidence.append(tech_entry)
 
-            if self.debug_log:
-                print(f"Additional LLM requirements for {external_ids}: {required_tools}")
-                print(f"Tools provided to model: {tools}")
-        else:
-            tools = None
         self.available_classes = external_ids
+
+        # AGENTIC EVIDENCE GATHERING
+        # for techniques that require external/OSINT knowledge, run a research agent
+        # (equipped with web_search) to collect grounded evidence BEFORE the classification
+        # decision is made, instead of granting the classifier itself live tool access
+        if techniques_needing_evidence:
+            if self.debug_log:
+                print(f"Techniques requiring OSINT evidence: {[t['external_id'] for t in techniques_needing_evidence]}")
+
+            evidence = self.gather_evidence(techniques_needing_evidence)
+
+            if evidence:
+                evidence_by_id = {e["external_id"]: e for e in evidence}
+                for tech_entry in techniques_needing_evidence:
+                    match = evidence_by_id.get(tech_entry["external_id"])
+                    if match:
+                        tech_entry["description"] += f"\n\nGathered Evidence: {match['findings']}"
+                        if match.get("sources"):
+                            tech_entry["description"] += f"\nSources: {', '.join(match['sources'])}"
+
+        # the classification call itself makes its decision from the gathered evidence above,
+        # it does not need live tool access
+        tools = None
 
         t_format = {
             "type": "object",
