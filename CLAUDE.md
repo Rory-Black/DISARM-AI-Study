@@ -25,6 +25,7 @@ This executes `test_interface()` at the bottom of the file, which is currently t
 
 Environment/external dependencies:
 - `OPENAI_API_KEY` must be set in the environment to use non-local models (`local_model=False`).
+- `DIFFBOT_TOKEN` must be set to use web-search evidence gathering with a local model. If it is unset, `DISARM_LLM` prints a warning and runs with evidence gathering disabled.
 - Local models expect a vLLM OpenAI-compatible server running at `http://localhost:8000`.
 
 ## Architecture
@@ -45,7 +46,13 @@ Both local (vLLM `chat.completions`) and OpenAI (`responses.create`) code paths 
 
 Technique/tactic external IDs are tokenized (`.` → `d`) before being sent to the model as JSON schema `enum` values, and detokenized in the results, to avoid the id being split across multiple tokens.
 
-For `INVESTIGATE` mode, `identify_techniques` looks up each technique's `external_id` in `.data/llm_additional_requirements.xlsx` (via `get_additional_llm_requirements` in `DISARM_DATA_MASTER.py`) to decide whether the model needs the `web_search` tool (e.g. for techniques requiring OSINT/internet access) — this is only wired up for the non-local (OpenAI) path.
+For `INVESTIGATE` mode, `identify_techniques` looks up each technique's `external_id` in `.data/llm_additional_requirements.xlsx` (via `get_additional_llm_requirements` in `DISARM_DATA_MASTER.py`) to decide whether it needs web search (i.e. techniques marked `Internet/OSINT access`). Those techniques are passed to `gather_evidence`, an agentic research step that runs *before* classification — the classifier itself never gets live tool access, it just receives the gathered findings appended to each technique's description.
+
+`gather_evidence` has two backends:
+- **Hosted** (`gather_evidence_hosted`) — one `responses.create` call with OpenAI's built-in `web_search` tool.
+- **Local** (`gather_evidence_local`) — the vLLM server has no tool-call parser enabled, so native `tools` come back as unparsed text in `message.content`. Instead the search loop is driven by structured output: each round the model returns `{"action": "search"|"answer", "queries": [...], "evidence": [...]}`, and the script runs any requested queries against **Diffbot's web search API** (`diffbot_web_search`, `https://llm.diffbot.com/api/v1/web_search` — *not* the Knowledge Graph search API) and feeds the results back as a user message. Capped at `max_search_rounds` (default 4) with up to 5 queries per round; on the final round `action` is narrowed to `["answer"]` to force a report. Already-run queries are deduplicated, and a failed search is reported back to the model rather than raised, so it can answer from what it already has.
+
+Constructor flags: `web_search` (default `True`), `max_search_rounds`, `results_per_query`.
 
 ### `scripts/DISARM_DATA_MASTER.py` — DISARM framework/data helpers
 Free functions for working with DISARM/MITRE-style JSON objects: `get_mitre_external_id`, `is_sub_tech`, `get_parent_extended_desc`, `get_additional_llm_requirements` (all read from `.data/llm_additional_requirements.xlsx`, keyed by external id in column A).
