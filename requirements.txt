@@ -2,3 +2,7 @@ requests
 openai
 pandas
 openpyxl
+matplotlib
+tqdm
+loguru
+scikit-learn

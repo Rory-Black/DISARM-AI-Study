@@ -20,6 +20,6 @@ docker run --rm \
     --model "${MODEL}" \
     --host 0.0.0.0 \
     --port ${PORT} \
-    --gpu-memory-utilization 0.90 \
+    --gpu-memory-utilization 0.80 \
     --enable-auto-tool-choice \
     --tool-call-parser functiongemma
