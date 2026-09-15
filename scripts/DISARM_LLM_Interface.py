@@ -32,18 +32,20 @@ class Log:
         "info": "INFO",
         "warn": "WARN",
     }
-    # colour is skipped when stdout isn't a terminal (e.g. redirected to a log file)
+    # written to stderr rather than stdout so these logs stay visible even when a
+    # caller redirects stdout to suppress noisy print()s elsewhere (e.g. label_dataset.py)
+    # colour is skipped when stderr isn't a terminal (e.g. redirected to a log file)
     # or when NO_COLOR is set, so logs stay readable either way
-    _enabled = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    _enabled = sys.stderr.isatty() and not os.environ.get("NO_COLOR")
 
     @classmethod
     def _emit(cls, kind, message):
         label = f"[{cls._LABELS[kind]}]"
         if cls._enabled:
             colour = cls._COLOURS[kind]
-            print(f"{colour}{label} {message}{cls._RESET}")
+            print(f"{colour}{label} {message}{cls._RESET}", file=sys.stderr)
         else:
-            print(f"{label} {message}")
+            print(f"{label} {message}", file=sys.stderr)
 
     @classmethod
     def system_prompt(cls, message):
@@ -297,6 +299,73 @@ The AI assistant has been designed to understand and categorize user input by th
 The user input will be in the following format:
 """ + T_SYS_FORMAT
 
+ST_SYS_FORMAT = """
+{
+Article: "article text",
+Technique: {'external_id': "external_id", 'description': "parent technique name and description"},
+SubTechniques: [{'external_id': "external_id", 'description': "sub-technique name and description"}]
+}
+The agent MUST respond with the following JSON format: 
+{
+“Techniques”: [“List of SubTechnique external_id”]
+}
+The agent MUST select at least one external_id, and MUST only select external_ids taken from the given SubTechniques list.
+"""
+
+ST_SYS_INVEST = """
+# DISARM Disinformation Sub-Technique Classification
+
+A DISARM technique used by the **author or publisher of the analysed media content** has already been identified. The assistant's task is to determine *how* that technique was used, by selecting from the sub-techniques of that technique.
+
+Sub-techniques are case-specific scenarios of their parent technique. The parent technique classification is already settled and is not under review - the assistant is only choosing which of its case-specific scenarios apply.
+
+## Core Rule
+
+Select a sub-technique when the **author or publisher themselves performs, facilitates, or directly contributes to the behaviour represented by that sub-technique**.
+
+Do **not** select a sub-technique merely because the article:
+
+* Describes another actor using it.
+* Quotes or reports another actor's disinformation.
+* Analyses or discusses a disinformation campaign.
+
+The classification target is:
+
+> **In which specific way did the author/publisher use the parent technique?**
+
+Not:
+
+> **Which sub-techniques are mentioned or attributed to actors in the article?**
+
+## Classification Rules
+
+* The assistant MUST select at least one sub-technique. The parent technique has already been confirmed as used by the author/publisher, so at least one of its case-specific scenarios applies.
+* Multiple sub-techniques may be selected when the author/publisher used the parent technique in more than one of these ways.
+* Only select external_ids that appear in the given SubTechniques list.
+* If no single sub-technique is clearly evidenced, select the one whose description is closest to the way the author/publisher used the parent technique.
+* Decide only from the given article text and technique descriptions. Do not search for, browse for, or assume information that is not given.
+
+### Final Decision Rule
+
+For every candidate sub-technique, ask:
+
+> **Is this the specific way in which the author/publisher used the parent technique?**
+
+**Author/publisher used the technique this way → select it.**
+**Another actor used the technique this way → do not select it.**
+**Author merely reported, quoted, or analysed it → do not select it.**
+
+The user input will be in the following format:
+""" + ST_SYS_FORMAT
+
+ST_SYS_RECOG = """
+The AI assistant has been designed to understand and categorize user input by the given sub-techniques.
+A DISARM technique has already been identified in the user input. Sub-techniques are case-specific scenarios of their parent technique, so the assistant must now predict which of the parent technique's sub-techniques the input corresponds to.
+The parent technique classification is already settled and is not under review. The assistant MUST select at least one sub-technique, and may select multiple where the input corresponds to more than one.
+The assistant must decide only from the given article text and technique descriptions, and must not search for or assume information that is not given.
+The user input will be in the following format:
+""" + ST_SYS_FORMAT
+
 EVIDENCE_SYS_INTRO = """
 # DISARM Technique Evidence Gathering
 
@@ -471,7 +540,7 @@ class DISARM_LLM:
 
         Log.response(output)
 
-        print()
+        print(file=sys.stderr)
         Log.info("Done in " + str(round(time.time() - start_time, 2)) + " seconds")
 
         return output
@@ -928,6 +997,123 @@ class DISARM_LLM:
 
         return self.identify_techniques(techniques)
 
+    # returns the technique JSON object with the given external id, or None if there isn't one
+    def get_technique_by_id(self, external_id):
+        for obj in self.get_all_techniques():
+            if get_mitre_external_id(obj) == external_id:
+                return obj
+        return None
+
+    # taxonomy helper method
+    # returns the child sub-technique objects of a parent technique - a sub-technique shares its
+    # parent's id prefix, e.g. T0084.001 and T0084.002 are children of T0084
+    def get_sub_techniques(self, parent_id):
+        sub_techniques = []
+        for obj in self.get_all_techniques():
+            ex_id = get_mitre_external_id(obj)
+            if ex_id and is_sub_tech(ex_id) and ex_id.split('.')[0] == parent_id:
+                sub_techniques.append(obj)
+        return sub_techniques
+
+    # taxonomy helper method - the second classification stage
+    # the parent technique has already been classified as used, so this narrows it down to the
+    # case-specific sub-technique(s) it was used as, and the model must pick at least one
+    # no evidence gathering happens here: whatever OSINT the parent technique needed was already
+    # gathered when it was classified in the first stage, so no internet searches are performed
+    def identify_sub_techniques(self, parent_id):
+        sub_techniques = self.get_sub_techniques(parent_id)
+        if not sub_techniques:
+            return []
+
+        Log.info("Testing sub-techniques of: " + parent_id)
+
+        parent = self.get_technique_by_id(parent_id)
+        parent_entry = {
+            "external_id": parent_id,
+            "description": parent.get("name") + "\n" + parent.get("description") if parent else "",
+        }
+
+        filtered_sub_techniques = []
+        external_ids = []
+        for sub_technique in sub_techniques:
+            ex_id = get_mitre_external_id(sub_technique)
+            ex_id_token = ex_id.replace('.', 'd', 1)  # tokenised form to stop separate tokens at the '.'
+            filtered_sub_techniques.append({
+                "external_id": ex_id_token,
+                "description": sub_technique.get("name") + "\n" + sub_technique.get("description"),
+            })
+            external_ids.append(ex_id_token)
+
+        self.available_classes = external_ids
+
+        st_format = {
+            "type": "object",
+            "properties": {
+                "Techniques": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": external_ids
+                    }
+                }
+            },
+            "required": ["Techniques"],
+            "additionalProperties": False
+        }
+
+        # alter the system prompt depending on mode
+        if self.clf_mode == Mode.INVESTIGATE:
+            system_prompt = ST_SYS_INVEST
+        else:
+            system_prompt = ST_SYS_RECOG
+
+        if self.local_model:
+            # guided decoding enforces the "at least one" rule for local models; the hosted
+            # json_schema format rejects minItems, so there it is carried by the system prompt
+            # alone and by the empty-result fallback below
+            st_format["properties"]["Techniques"]["minItems"] = 1
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "sub_techniques_schema",
+                    "schema": st_format
+                }
+            }
+        else:
+            response_format = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "sub_techniques_schema",
+                    "schema": st_format
+                }
+            }
+
+        st_prompt = f"""
+{{
+"Article": {json.dumps(self.article_content)},
+"Technique": {json.dumps(parent_entry, indent=2)},
+"SubTechniques": {json.dumps(filtered_sub_techniques, indent=2)}
+}}
+"""
+        try:
+            st_result_parsed = self.prompt_valid_DISARM_response(prompt=st_prompt, system_prompt=system_prompt, response_format=response_format)
+            st_result_list = st_result_parsed.get("Techniques", [])
+            results = []
+            for t in st_result_list:
+                results.append(t.replace('d', '.', 1))  # return to untokenised form
+        except APITimeoutError:
+            Log.warn("Model Failed to return result")
+            raise
+
+        if not results:
+            # the model was asked for at least one sub-technique but gave none - keep the parent
+            # classification rather than dropping the technique from the results altogether
+            Log.warn("No sub-technique selected for " + parent_id + ", falling back to the parent technique")
+            return [parent_id]
+
+        Log.info("Identified Sub-Techniques of " + parent_id + ": " + str(results))
+        return results
+
     # prompts the model to return it's rationale behind each label
     def identify_rationales(self, external_ids):
         pass # TODO improvement
@@ -949,6 +1135,45 @@ class DISARM_LLM:
         for tactic in tactics:
             techniques = self.identify_techniques_for_tactic(tactic)
             total_techniques.extend(techniques)
+
+        Log.info("Total Identified Techniques: " + str(total_techniques))
+        Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
+        return tactics, total_techniques
+
+    # uses a batch_clf architecture to identify parent techniques, then runs a second
+    # classification stage over the sub-techniques of each identified parent technique
+    # sub-techniques are case-specific scenarios of their parent, so where a parent technique has
+    # children the second stage decides which of those scenarios it was actually used as, and the
+    # parent is replaced in the results by the selected sub-technique(s)
+    def taxonomy(self):
+        start_time = time.time()
+
+        # PARENT TECHNIQUES
+        check_sub_techniques = self.chq_sb_tchnqs
+        self.chq_sb_tchnqs = False  # ensure batch_clf is done without checking sub techniques
+        try:
+            tactics, parent_techniques = self.batch_clf()
+        finally:
+            self.chq_sb_tchnqs = check_sub_techniques
+
+        # SUB-TECHNIQUES LOOP
+        # a technique can belong to more than one tactic, so the same parent can come back from
+        # batch_clf several times - dedupe (preserving order) to avoid re-prompting for it
+        total_techniques = []
+        for parent_id in dict.fromkeys(parent_techniques):
+            if is_sub_tech(parent_id):
+                # the first stage filters sub-techniques out, but keep one that slips through
+                total_techniques.append(parent_id)
+                continue
+
+            sub_techniques = self.identify_sub_techniques(parent_id)
+            if sub_techniques:
+                total_techniques.extend(sub_techniques)
+            else:
+                # parent technique has no sub-techniques, so it stands on its own
+                total_techniques.append(parent_id)
+
+        total_techniques = list(dict.fromkeys(total_techniques))
 
         Log.info("Total Identified Techniques: " + str(total_techniques))
         Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
@@ -1009,7 +1234,7 @@ How far the government in Warsaw will go is difficult to assess. In the event of
         debug_log=False,
     )
 
-    _, techniques = llm.batch_clf()
+    _, techniques = llm.taxonomy()
 
     Log.info(str(techniques))
 
