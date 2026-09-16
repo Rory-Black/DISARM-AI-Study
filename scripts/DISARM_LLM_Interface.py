@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 
 from DISARM_DATA_MASTER import get_mitre_external_id, is_sub_tech, get_parent_extended_desc, get_additional_llm_requirements
+from agent_events import Cancelled, truncate
 
 
 # colour-coded console logging so different kinds of debug output (system prompts,
@@ -38,6 +39,19 @@ class Log:
     # or when NO_COLOR is set, so logs stay readable either way
     _enabled = sys.stderr.isatty() and not os.environ.get("NO_COLOR")
 
+    # additional destinations for log lines, e.g. the GUI's live log pane
+    # a sink is called as sink(kind, message) and must never raise
+    _sinks = []
+
+    @classmethod
+    def add_sink(cls, sink):
+        cls._sinks.append(sink)
+
+    @classmethod
+    def remove_sink(cls, sink):
+        if sink in cls._sinks:
+            cls._sinks.remove(sink)
+
     @classmethod
     def _emit(cls, kind, message):
         label = f"[{cls._LABELS[kind]}]"
@@ -46,6 +60,13 @@ class Log:
             print(f"{colour}{label} {message}{cls._RESET}", file=sys.stderr)
         else:
             print(f"{label} {message}", file=sys.stderr)
+
+        for sink in list(cls._sinks):
+            try:
+                sink(kind, str(message))
+            except Exception:
+                # a broken observer must never break a classification run
+                pass
 
     @classmethod
     def system_prompt(cls, message):
@@ -468,8 +489,17 @@ class DISARM_LLM:
                  debug_log=False,
                  web_search=True,
                  max_search_rounds=4,
-                 results_per_query=5
+                 results_per_query=5,
+                 on_event=None,
+                 should_stop=None
                  ):
+        # on_event(event_type, **payload) receives structured progress events; should_stop()
+        # is polled at loop boundaries so an observer can cancel a run. Both default to
+        # no-ops, so nothing changes for callers that don't pass them.
+        self.on_event = on_event
+        self.should_stop = should_stop
+        self.available_classes = None
+        self._task = None
         self.article_content = article_content
         self.MODEL_NAME = model_name
         self.local_model = local_model
@@ -488,6 +518,27 @@ class DISARM_LLM:
 
         with open(JSON_DATA, "r", encoding="utf-8") as f:
             self.disarm_json = json.load(f)
+
+    # emits a structured progress event to the observer, if one is attached
+    def _emit(self, event_type, **payload):
+        if self.on_event is not None:
+            try:
+                self.on_event(event_type, **payload)
+            except Cancelled:
+                raise
+            except Exception:
+                # never let a broken observer break a run
+                pass
+
+    # polled at loop boundaries so a run can be cancelled between LLM calls
+    def _check_stop(self):
+        if self.should_stop is not None and self.should_stop():
+            raise Cancelled("Run stopped by user")
+
+    # records what the agent is working on right now, so the observer can show it
+    def _set_task(self, kind, label, **detail):
+        self._task = {"kind": kind, "label": label, **detail}
+        self._emit("task", kind=kind, label=label, **detail)
 
     def vllm_response(self, messages, response_format, seed=44):
         response = local_client.chat.completions.create(
@@ -511,7 +562,16 @@ class DISARM_LLM:
         return response
 
     def prompt_llm_response(self, prompt, system_prompt=None, messages = None, response_format=None, tools=None):
+        self._check_stop()
         start_time = time.time()
+        task_label = self._task["label"] if self._task else "Classifying"
+        self._emit(
+            "llm_call_started",
+            task=task_label,
+            model=self.MODEL_NAME,
+            candidates=len(self.available_classes) if self.available_classes else 0,
+            prompt_chars=len(prompt or ""),
+        )
 
         if self.debug_log:
             Log.system_prompt(system_prompt)
@@ -541,7 +601,9 @@ class DISARM_LLM:
         Log.response(output)
 
         print(file=sys.stderr)
-        Log.info("Done in " + str(round(time.time() - start_time, 2)) + " seconds")
+        duration = round(time.time() - start_time, 2)
+        Log.info("Done in " + str(duration) + " seconds")
+        self._emit("llm_call_finished", task=task_label, duration=duration, output=truncate(output, 600))
 
         return output
 
@@ -584,7 +646,7 @@ class DISARM_LLM:
                 if key == "Techniques":
                     parent_tech = v.split('_')[0]
                     if parent_tech in self.available_classes:
-                        self.log_warning("Warning: Model returned invalid sub-technique, but parent technique is correct, ignoring...")
+                        Log.warn("Model returned invalid sub-technique, but parent technique is correct, ignoring...")
                         if parent_tech in values:
                             values.remove(v)
                         else:
@@ -691,9 +753,11 @@ class DISARM_LLM:
 """
         
         Log.info("Identifying Tactics...")
+        self._set_task("tactics", "Narrowing down candidate tactics", candidates=len(self.available_classes))
         ta_result_parsed = self.prompt_valid_DISARM_response(prompt=ta_prompt, system_prompt=system_prompt, response_format=response_format)
         ta_result_list = ta_result_parsed.get("Tactics", [])    
         Log.info("Identified Tactics: " + str(ta_result_list))
+        self._emit("tactics_identified", tactics=ta_result_list)
         return ta_result_list
 
     # agentic evidence-gathering step for techniques that require external/OSINT knowledge
@@ -716,12 +780,34 @@ class DISARM_LLM:
         Log.info("Gathering evidence for techniques requiring external knowledge...")
         start_time = time.time()
 
+        ids = [t["external_id"].replace("d", ".", 1) for t in techniques_needing_evidence]
+        self._set_task("evidence", "Researching techniques that need outside evidence", external_ids=ids)
+        self._emit(
+            "evidence_started",
+            external_ids=ids,
+            backend="diffbot" if self.local_model else "hosted web_search",
+            max_rounds=self.max_search_rounds,
+        )
+
         if self.local_model:
             evidence = self.gather_evidence_local(evidence_prompt)
         else:
             evidence = self.gather_evidence_hosted(evidence_prompt)
 
-        Log.info("Evidence gathering done in " + str(round(time.time() - start_time, 2)) + " seconds")
+        duration = round(time.time() - start_time, 2)
+        Log.info("Evidence gathering done in " + str(duration) + " seconds")
+        self._emit(
+            "evidence_reported",
+            duration=duration,
+            evidence=[
+                {
+                    "external_id": (e.get("external_id") or "").replace("d", ".", 1),
+                    "findings": e.get("findings", ""),
+                    "sources": e.get("sources", []) or [],
+                }
+                for e in (evidence or [])
+            ],
+        )
         return evidence
 
     # JSON schema for the evidence report produced by either evidence-gathering path
@@ -815,6 +901,7 @@ class DISARM_LLM:
         searched = set()
 
         for round_num in range(1, self.max_search_rounds + 1):
+            self._check_stop()
             # on the final round drop "search" from the enum so the model has to report back
             final_round = round_num == self.max_search_rounds
             schema = json.loads(json.dumps(step_format))
@@ -836,16 +923,32 @@ class DISARM_LLM:
                 return step.get("evidence", [])
 
             Log.search(f"Search round {round_num}/{self.max_search_rounds}: {queries}")
+            self._emit("search_round", round=round_num, max_rounds=self.max_search_rounds, queries=queries)
             searched.update(q.strip().lower() for q in queries)
 
             try:
                 results = diffbot_web_search(queries, size=self.results_per_query)
                 search_reply = {"search_results": results}
                 Log.search(f"  {len(results)} results from Diffbot")
+                self._emit(
+                    "search_results",
+                    round=round_num,
+                    count=len(results),
+                    results=[
+                        {
+                            "title": r.get("title"),
+                            "url": r.get("url"),
+                            "date": r.get("date"),
+                            "snippet": truncate(r.get("content"), 300),
+                        }
+                        for r in results
+                    ],
+                )
             except requests.RequestException as e:
                 # a failed search shouldn't sink the whole classification - tell the model and
                 # let it carry on with whatever it has already found
                 Log.warn(f"  Web search failed: {e}")
+                self._emit("search_failed", round=round_num, error=str(e))
                 search_reply = {"search_results": [], "error": f"Web search failed: {e}"}
 
             if self.debug_log:
@@ -901,8 +1004,7 @@ class DISARM_LLM:
         # models) to collect grounded evidence BEFORE the classification decision is made,
         # instead of granting the classifier itself live tool access
         if techniques_needing_evidence:
-            if self.debug_log:
-                Log.info(f"Techniques requiring OSINT evidence: {[t['external_id'] for t in techniques_needing_evidence]}")
+            Log.info(f"Techniques requiring OSINT evidence: {[t['external_id'] for t in techniques_needing_evidence]}")
 
             evidence = self.gather_evidence(techniques_needing_evidence)
 
@@ -982,11 +1084,13 @@ class DISARM_LLM:
             Log.warn("Model Failed to return result")
             raise APITimeoutError
         Log.info("Identified Techniques: " + str(results))
+        self._emit("techniques_identified", techniques=results, context=(self._task or {}).get("label", ""))
         return results
     
     # batchClf helper method
     # prompts the model to label the techniques belonging to a tactic 
-    def identify_techniques_for_tactic(self, tactic):
+    def identify_techniques_for_tactic(self, tactic, index=None, total=None):
+        self._check_stop()
         Log.info("Testing for tactic: " + tactic)
         techniques = []
         for obj in self.disarm_json["objects"]:
@@ -995,7 +1099,26 @@ class DISARM_LLM:
                     if phase.get("phase_name") == tactic:
                         techniques.append(obj)
 
-        return self.identify_techniques(techniques)
+        start_time = time.time()
+        self._set_task(
+            "techniques",
+            f"Testing techniques under tactic '{tactic}'",
+            tactic=tactic,
+            index=index,
+            total=total,
+            technique_count=len(techniques),
+        )
+        self._emit("tactic_started", tactic=tactic, index=index, total=total, technique_count=len(techniques))
+        results = self.identify_techniques(techniques)
+        self._emit(
+            "tactic_finished",
+            tactic=tactic,
+            index=index,
+            total=total,
+            techniques=results,
+            duration=round(time.time() - start_time, 2),
+        )
+        return results
 
     # returns the technique JSON object with the given external id, or None if there isn't one
     def get_technique_by_id(self, external_id):
@@ -1026,6 +1149,13 @@ class DISARM_LLM:
             return []
 
         Log.info("Testing sub-techniques of: " + parent_id)
+        self._check_stop()
+        self._set_task(
+            "sub_techniques",
+            f"Deciding how {parent_id} was used",
+            parent=parent_id,
+            candidate_count=len(sub_techniques),
+        )
 
         parent = self.get_technique_by_id(parent_id)
         parent_entry = {
@@ -1109,9 +1239,11 @@ class DISARM_LLM:
             # the model was asked for at least one sub-technique but gave none - keep the parent
             # classification rather than dropping the technique from the results altogether
             Log.warn("No sub-technique selected for " + parent_id + ", falling back to the parent technique")
+            self._emit("sub_techniques_identified", parent=parent_id, techniques=[parent_id], fallback=True)
             return [parent_id]
 
         Log.info("Identified Sub-Techniques of " + parent_id + ": " + str(results))
+        self._emit("sub_techniques_identified", parent=parent_id, techniques=results, fallback=False)
         return results
 
     # prompts the model to return it's rationale behind each label
@@ -1131,13 +1263,16 @@ class DISARM_LLM:
         else:
             f, tactics = self.get_tactics()
         #TECHNIQUES LOOP
+        self._emit("plan", architecture="batch_clf", tactics=list(tactics), fast=fast)
         total_techniques = []
-        for tactic in tactics:
-            techniques = self.identify_techniques_for_tactic(tactic)
+        for i, tactic in enumerate(tactics, start=1):
+            techniques = self.identify_techniques_for_tactic(tactic, index=i, total=len(tactics))
             total_techniques.extend(techniques)
 
+        duration = round(time.time() - start_time, 2)
         Log.info("Total Identified Techniques: " + str(total_techniques))
-        Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
+        Log.info("Total execution time: " + str(duration) + " seconds")
+        self._emit("classification_complete", architecture="batch_clf", tactics=list(tactics), techniques=total_techniques, duration=duration)
         return tactics, total_techniques
 
     # uses a batch_clf architecture to identify parent techniques, then runs a second
@@ -1159,8 +1294,10 @@ class DISARM_LLM:
         # SUB-TECHNIQUES LOOP
         # a technique can belong to more than one tactic, so the same parent can come back from
         # batch_clf several times - dedupe (preserving order) to avoid re-prompting for it
+        parents = list(dict.fromkeys(parent_techniques))
+        self._emit("plan", architecture="taxonomy", stage="sub_techniques", parents=parents)
         total_techniques = []
-        for parent_id in dict.fromkeys(parent_techniques):
+        for parent_id in parents:
             if is_sub_tech(parent_id):
                 # the first stage filters sub-techniques out, but keep one that slips through
                 total_techniques.append(parent_id)
@@ -1175,32 +1312,45 @@ class DISARM_LLM:
 
         total_techniques = list(dict.fromkeys(total_techniques))
 
+        duration = round(time.time() - start_time, 2)
         Log.info("Total Identified Techniques: " + str(total_techniques))
-        Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
+        Log.info("Total execution time: " + str(duration) + " seconds")
+        self._emit("classification_complete", architecture="taxonomy", tactics=list(tactics), techniques=total_techniques, duration=duration)
         return tactics, total_techniques
 
     # uses select_all_clf architecture to identify all tecnhiques in a single prompts
     def select_all_clf(self):
         start_time = time.time() 
 
+        self._set_task("techniques", "Testing the whole framework in a single prompt")
         total_techniques = self.identify_techniques()
 
         Log.info("Total Identified Techniques: " + str(total_techniques))
-        Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
-        self.log_final_result(None,total_techniques, round(time.time() - start_time, 2))
+        duration = round(time.time() - start_time, 2)
+        Log.info("Total execution time: " + str(duration) + " seconds")
+        self._emit("classification_complete", architecture="select_all_clf", tactics=[], techniques=total_techniques, duration=duration)
         return total_techniques
 
     # one prompt for each tecnhique architecture
     def single_clf(self):
         start_time = time.time() 
         available_techniques = self.get_all_techniques()
+        self._emit("plan", architecture="single_clf", technique_count=len(available_techniques))
         total_techniques = []
-        for technique in available_techniques:
+        for i, technique in enumerate(available_techniques, start=1):
+            self._check_stop()
+            self._set_task(
+                "techniques",
+                f"Testing technique {get_mitre_external_id(technique)} on its own",
+                index=i,
+                total=len(available_techniques),
+            )
             total_techniques += self.identify_techniques(techniques=[technique])
 
         Log.info("Total Identified Techniques: " + str(total_techniques))
-        Log.info("Total execution time: " + str(round(time.time() - start_time, 2)) + " seconds")
-        self.log_final_result(None,total_techniques, round(time.time() - start_time, 2))
+        duration = round(time.time() - start_time, 2)
+        Log.info("Total execution time: " + str(duration) + " seconds")
+        self._emit("classification_complete", architecture="single_clf", tactics=[], techniques=total_techniques, duration=duration)
         return total_techniques
 
 def test_interface():

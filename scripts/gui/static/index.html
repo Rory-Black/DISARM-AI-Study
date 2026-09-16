@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DISARM Agent Console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>DISARM Agent Console <span>· classification &amp; labelling</span></h1>
+  <span id="statusPill" class="pill idle"><i class="dot"></i><span id="statusText">idle</span></span>
+  <span id="elapsed" class="code" style="color:var(--fg-faint);font-size:12px"></span>
+  <span class="spacer"></span>
+  <span id="envWarn" class="hint warn" style="margin:0"></span>
+  <button id="stopBtn" class="danger" disabled>Stop run</button>
+</header>
+
+<div class="layout">
+
+  <!-- ============================ sidebar ============================ -->
+  <aside>
+    <div id="formError" class="error-box" hidden></div>
+
+    <div class="group">
+      <h2>Agent configuration</h2>
+
+      <label class="field">
+        <span>Classification mode</span>
+        <select id="mode">
+          <option value="INVESTIGATE">INVESTIGATE — techniques the author/publisher used</option>
+          <option value="RECOGNISE">RECOGNISE — techniques referenced anywhere in the article</option>
+        </select>
+      </label>
+      <p class="hint" id="modeHint"></p>
+
+      <label class="field">
+        <span>Architecture</span>
+        <select id="architecture">
+          <option value="batch_clf">batch_clf — one prompt per tactic (16 calls)</option>
+          <option value="batch_clf_fast">batch_clf_fast — pick tactics first, then their techniques</option>
+          <option value="taxonomy">taxonomy — batch_clf, then drill into sub-techniques</option>
+          <option value="select_all_clf">select_all_clf — whole framework in one prompt</option>
+          <option value="single_clf">single_clf — one prompt per technique (slowest)</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Model</span>
+        <input type="text" id="model_name" spellcheck="false">
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="local_model" checked>
+        <span>Local model (vLLM)
+          <small>Off = OpenAI hosted model, needs OPENAI_API_KEY</small></span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="check_sub_techniques">
+        <span>Check sub-techniques
+          <small>Include sub-techniques as candidates in every prompt</small></span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="web_search" checked>
+        <span>Gather evidence from the web
+          <small>Research OSINT-dependent techniques before classifying (INVESTIGATE only)</small></span>
+      </label>
+
+      <div id="searchOpts">
+        <label class="field">
+          <span>Max search rounds</span>
+          <input type="number" id="max_search_rounds" min="1" max="10" value="4">
+        </label>
+        <label class="field">
+          <span>Results per query</span>
+          <input type="number" id="results_per_query" min="1" max="20" value="5">
+        </label>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>What to classify</h2>
+      <div class="tabs" id="sourceTabs">
+        <button data-src="paste" class="active">Paste text</button>
+        <button data-src="files">Upload files</button>
+        <button data-src="dataset">Dataset</button>
+      </div>
+
+      <div data-srcpanel="paste">
+        <label class="field">
+          <span>Article text</span>
+          <textarea id="articleText" placeholder="Paste the article text here…"></textarea>
+        </label>
+      </div>
+
+      <div data-srcpanel="files" hidden>
+        <div class="dropzone" id="dropzone">
+          Drop <b>.txt</b> / <b>.md</b> / <b>.json</b> files here, or click to choose.<br>
+          Each file is classified as one article, in order.
+        </div>
+        <input type="file" id="fileInput" multiple accept=".txt,.md,.json,.text" hidden>
+        <div class="filelist" id="fileList"></div>
+      </div>
+
+      <div data-srcpanel="dataset" hidden>
+        <p class="hint">Runs <b>label_dataset.py</b> over the balanced euvsdisinfo subset, appending each
+          result to the JSONL cache. Articles already in the cache are skipped, so a run can be stopped
+          and resumed.</p>
+        <label class="field">
+          <span>Articles to label this run (blank = all remaining)</span>
+          <input type="number" id="limit" min="1" placeholder="e.g. 10">
+        </label>
+        <label class="check">
+          <input type="checkbox" id="export" checked>
+          <span>Export on completion
+            <small>Write euvsdisinfo_labelled.csv and the train/dev split</small></span>
+        </label>
+        <div id="datasetSummary" class="hint"></div>
+      </div>
+    </div>
+
+    <button id="runBtn" class="primary" style="width:100%">Run classification</button>
+  </aside>
+
+  <!-- ============================== main ============================= -->
+  <main>
+
+    <div class="now">
+      <div class="now-head">
+        <span class="now-kicker">Now</span>
+        <span class="now-task" id="nowTask">Idle — configure a run and press Run</span>
+      </div>
+      <div class="now-sub" id="nowSub"></div>
+
+      <div class="bars" id="bars" hidden>
+        <div class="bar" id="barArticles" hidden>
+          <div class="bar-label"><span>Articles</span><span id="barArticlesVal"></span></div>
+          <div class="bar-track"><div class="bar-fill green" id="barArticlesFill" style="width:0%"></div></div>
+        </div>
+        <div class="bar" id="barSteps" hidden>
+          <div class="bar-label"><span id="barStepsLabel">Tactics</span><span id="barStepsVal"></span></div>
+          <div class="bar-track"><div class="bar-fill" id="barStepsFill" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat tech"><b id="statTech">0</b><span>Techniques found</span></div>
+        <div class="stat ev"><b id="statEv">0</b><span>Evidence items</span></div>
+        <div class="stat search"><b id="statSearch">0</b><span>Web searches</span></div>
+        <div class="stat"><b id="statCalls">0</b><span>LLM calls</span></div>
+        <div class="stat"><b id="statArticles">0</b><span>Articles done</span></div>
+        <div class="stat fail"><b id="statFail">0</b><span>Failures</span></div>
+      </div>
+    </div>
+
+    <div class="maintabs" id="mainTabs">
+      <button data-tab="activity" class="active">Activity</button>
+      <button data-tab="techniques">Techniques <span class="badge" id="badgeTech">0</span></button>
+      <button data-tab="evidence">Evidence <span class="badge" id="badgeEv">0</span></button>
+      <button data-tab="searches">Searches <span class="badge" id="badgeSearch">0</span></button>
+      <button data-tab="articles">Articles <span class="badge" id="badgeArt">0</span></button>
+      <button data-tab="framework">Framework</button>
+      <button data-tab="logs">Logs</button>
+    </div>
+
+    <div class="panels">
+      <div class="panel active" data-panel="activity">
+        <div class="feed" id="feed"></div>
+        <div class="empty" id="feedEmpty">Nothing yet. Start a run to watch the agent work.</div>
+      </div>
+
+      <div class="panel" data-panel="techniques">
+        <div id="techniques"></div>
+        <div class="empty" id="techEmpty">No techniques identified yet.</div>
+      </div>
+
+      <div class="panel" data-panel="evidence">
+        <div id="evidence"></div>
+        <div class="empty" id="evEmpty">No evidence gathered yet. Evidence is collected for techniques that
+          need outside knowledge, in INVESTIGATE mode with web search on.</div>
+      </div>
+
+      <div class="panel" data-panel="searches">
+        <div id="searches"></div>
+        <div class="empty" id="searchEmpty">No web searches run yet.</div>
+      </div>
+
+      <div class="panel" data-panel="articles">
+        <div class="summary-grid" id="articleStats"></div>
+        <div id="articles"></div>
+        <div class="empty" id="artEmpty">No articles processed yet.</div>
+      </div>
+
+      <div class="panel" data-panel="framework">
+        <div class="fw-controls">
+          <input type="text" id="fwSearch" placeholder="Search techniques by id, name or description…">
+          <select id="fwTactic"><option value="">All tactics</option></select>
+        </div>
+        <div id="framework"></div>
+      </div>
+
+      <div class="panel" data-panel="logs">
+        <div class="logbar">
+          <label class="check" style="margin:0"><input type="checkbox" id="logFollow" checked><span>Follow</span></label>
+          <button id="logClear">Clear</button>
+          <span class="hint" style="margin:0">Raw engine log, exactly as the terminal would show it.</span>
+        </div>
+        <div class="logbox" id="logbox"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

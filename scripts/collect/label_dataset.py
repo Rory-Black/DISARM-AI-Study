@@ -1,17 +1,36 @@
 import os
+import sys
+import json
+import contextlib
+
 import pandas as pd
+import matplotlib
+
+matplotlib.use("Agg")  # no display when driven from the GUI or a headless box
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from loguru import logger
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from DISARM_LLM_Interface import DISARM_LLM, Mode
-import json
-import contextlib
+from agent_events import Cancelled, truncate
 
 
 DATASET_PATH = os.path.join(".data/euvsdisinfo.csv")
 SUBSET_PATH = ".data/euvsdisinfo_bal_set.csv"
 CACHE_PATH = os.path.join(".data/euvsdisinfo_cache.json")
+EXPERIMENTS_DIR = ".data/experiments"
+
+# the classification architectures a caller may pick between; each returns (tactics, techniques)
+ARCHITECTURES = {
+    "batch_clf": lambda llm: llm.batch_clf(),
+    "batch_clf_fast": lambda llm: llm.batch_clf(fast=True),
+    "taxonomy": lambda llm: llm.taxonomy(),
+    "select_all_clf": lambda llm: (None, llm.select_all_clf()),
+    "single_clf": lambda llm: (None, llm.single_clf()),
+}
 
 
 def ballance_dataset(df, required_balance, min_class_samples):
@@ -95,70 +114,193 @@ def load_cache(path=CACHE_PATH):
 
     else:
         print("Cache file does not exist. Creating a new one.")
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
             pass
 
     return cache
 
-def main():
-    """Uses the LLM interface to label the articles with DISARM techniques"""
-    if not os.path.exists(SUBSET_PATH):
-        create_euvsdisinfo_bal_set()
 
-    df = pd.read_csv(SUBSET_PATH)
-    skipped = 0
-    failures = 0
-    for i, row in tqdm(df.iterrows(), total=len(df)):
-        # break if it has reached the desired size
-        cache = load_cache()
-        if len(cache) >= len(df):
-            logger.debug("Cache Reached desired length, stopping")
-            break
-        # check if already classified in cache
-        if row.article_id in [c["article_id"] for c in cache]:
-            skipped+=1
-            logger.debug(f"Skipped: {skipped}")
-            continue
+def _json_safe(value):
+    """pandas/numpy scalars aren't JSON serialisable on their own - fall back to str."""
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, AttributeError):
+            pass
+    return str(value)
 
-        # classify the article
-        with open(os.devnull, 'w') as f:
-            # ignore print statements from the disarm classifier
-            with contextlib.redirect_stdout(f):
-                llm = DISARM_LLM(
-                    article_content=row.text,
-                    model_name="google/gemma-4-26B-A4B-it",
-                    local_model=True,
-                    mode=Mode.INVESTIGATE,
-                    check_sub_techniques=False,
-                    debug_log=False,
-                    web_search=True,
-                )
-                try:
-                    _, techniques = llm.batch_clf()
-                    logger.debug(
-                        f"Successfully labelled {row.article_id} with techniques - {techniques}"
-                    )
-                except Exception as e:
-                    logger.error("ERROR: ", e)
-                    failures+=1
-                    continue
-        data = dict(row)
-        data["disarm_techniques"] = techniques
-        with open(CACHE_PATH, "a") as f:
-            f.write(json.dumps(data) + "\n")
-    
-    df = load_cache(CACHE_PATH)
-    df = pd.DataFrame(df)
-    df.to_csv(".data/euvsdisinfo_labelled.csv", index=False)
+
+def export_splits(cache_path=CACHE_PATH, experiments_dir=EXPERIMENTS_DIR):
+    """Turns the labelled cache into the labelled CSV plus the train/dev split.
+
+    Returns the paths written. The stratified split needs at least two articles per
+    class+language group, so it is skipped (rather than raising) on a partial cache.
+    """
+    df = pd.DataFrame(load_cache(cache_path))
+    if df.empty:
+        return []
+
+    # name the labelled CSV after the cache it came from, so a run against an alternate
+    # cache never overwrites the main .data/euvsdisinfo_labelled.csv
+    stem = os.path.splitext(os.path.basename(cache_path))[0]
+    if stem.endswith("_cache"):
+        stem = stem[: -len("_cache")]
+    written = []
+    labelled_path = os.path.join(os.path.dirname(cache_path) or ".data", f"{stem}_labelled.csv")
+    df.to_csv(labelled_path, index=False)
+    written.append(labelled_path)
 
     # SPLITTING INTO TRAIN AND TEST DATA
-    train_df, dev_df = train_test_split(df, test_size=0.1, stratify=df["stratify"], random_state=42)
+    os.makedirs(experiments_dir, exist_ok=True)
+    try:
+        train_df, dev_df = train_test_split(df, test_size=0.1, stratify=df["stratify"], random_state=42)
+    except (ValueError, KeyError) as e:
+        logger.warning(f"Skipping train/dev split: {e}")
+        return written
 
-    train_df = train_df[["text", "disarm_techniques", "label", "language", "keywords", "debunk_date"]]
-    dev_df = dev_df[["text", "disarm_techniques", "label", "language", "keywords", "debunk_date"]]
+    columns = ["text", "disarm_techniques", "label", "language", "keywords", "debunk_date"]
+    columns = [c for c in columns if c in train_df.columns]
 
-    train_df.to_csv(".data/experiments/euvsdisinfo.csv", index=False)
-    dev_df.to_csv(".data/experiments/euvsdisinfo_dev.csv", index=False)
+    train_path = os.path.join(experiments_dir, "euvsdisinfo.csv")
+    dev_path = os.path.join(experiments_dir, "euvsdisinfo_dev.csv")
+    train_df[columns].to_csv(train_path, index=False)
+    dev_df[columns].to_csv(dev_path, index=False)
+    written += [train_path, dev_path]
+    return written
+
+
+def run_labelling(
+    model_name="google/gemma-4-26B-A4B-it",
+    local_model=True,
+    mode=Mode.INVESTIGATE,
+    architecture="batch_clf",
+    check_sub_techniques=False,
+    web_search=True,
+    max_search_rounds=4,
+    results_per_query=5,
+    limit=None,
+    subset_path=SUBSET_PATH,
+    cache_path=CACHE_PATH,
+    export=True,
+    quiet=True,
+    on_event=None,
+    should_stop=None,
+):
+    """Labels articles from the balanced subset with DISARM techniques.
+
+    Every article already present in the cache is skipped, so a run can be stopped and
+    resumed. `on_event(event_type, **payload)` receives per-article progress on top of
+    the per-step events the classifier itself emits, and `should_stop()` is polled
+    between articles so a caller can cancel cleanly without losing completed work.
+    """
+
+    def emit(event_type, **payload):
+        if on_event is not None:
+            on_event(event_type, **payload)
+
+    if architecture not in ARCHITECTURES:
+        raise ValueError(f"Unknown architecture '{architecture}'. Choose from {sorted(ARCHITECTURES)}")
+
+    if not os.path.exists(subset_path):
+        emit("dataset_preparing", subset_path=subset_path)
+        create_euvsdisinfo_bal_set()
+
+    df = pd.read_csv(subset_path)
+    cache = load_cache(cache_path)
+    done_ids = {c.get("article_id") for c in cache}
+
+    pending = [(i, row) for i, row in df.iterrows() if row.article_id not in done_ids]
+    if limit:
+        pending = pending[: int(limit)]
+
+    emit(
+        "dataset_started",
+        total=len(df),
+        already_labelled=len(done_ids),
+        queued=len(pending),
+        subset_path=subset_path,
+        cache_path=cache_path,
+        architecture=architecture,
+    )
+
+    skipped = len(done_ids)
+    failures = 0
+    completed = 0
+
+    progress = tqdm(pending, total=len(pending)) if not quiet else pending
+    for position, (i, row) in enumerate(progress, start=1):
+        if should_stop is not None and should_stop():
+            emit("dataset_stopped", completed=completed, failed=failures)
+            break
+
+        emit(
+            "article_started",
+            index=position,
+            total=len(pending),
+            article_id=row.article_id,
+            publisher=getattr(row, "article_publisher", None),
+            url=getattr(row, "article_url", None),
+            language=getattr(row, "language", None),
+            label=int(row["class"]) if "class" in row else None,
+            chars=len(str(row.text)),
+            preview=truncate(row.text, 500),
+        )
+
+        llm = DISARM_LLM(
+            article_content=row.text,
+            model_name=model_name,
+            local_model=local_model,
+            mode=mode,
+            check_sub_techniques=check_sub_techniques,
+            debug_log=False,
+            web_search=web_search,
+            max_search_rounds=max_search_rounds,
+            results_per_query=results_per_query,
+            on_event=on_event,
+            should_stop=should_stop,
+        )
+
+        # the classifier prints a fair amount to stdout; suppress it for the CLI run
+        # but leave it alone when a caller wants to capture it
+        stdout_guard = open(os.devnull, "w") if quiet else None
+        try:
+            with contextlib.redirect_stdout(stdout_guard) if quiet else contextlib.nullcontext():
+                _, techniques = ARCHITECTURES[architecture](llm)
+        except Cancelled:
+            emit("dataset_stopped", completed=completed, failed=failures)
+            break
+        except Exception as e:
+            logger.error(f"Failed to label {row.article_id}: {e}")
+            failures += 1
+            emit("article_failed", index=position, article_id=row.article_id, error=str(e))
+            continue
+        finally:
+            if stdout_guard is not None:
+                stdout_guard.close()
+
+        logger.debug(f"Successfully labelled {row.article_id} with techniques - {techniques}")
+
+        data = {k: v for k, v in dict(row).items()}
+        data["disarm_techniques"] = techniques
+        with open(cache_path, "a") as f:
+            f.write(json.dumps(data, default=_json_safe) + "\n")
+
+        completed += 1
+        emit("article_finished", index=position, article_id=row.article_id, techniques=techniques)
+
+    exports = []
+    if export and completed:
+        exports = export_splits(cache_path)
+
+    emit("dataset_finished", labelled=completed, skipped=skipped, failed=failures, exports=exports)
+    return {"labelled": completed, "skipped": skipped, "failed": failures, "exports": exports}
+
+
+def main():
+    """Uses the LLM interface to label the articles with DISARM techniques"""
+    run_labelling(quiet=True)
+
 
 if __name__ == "__main__":
     main()

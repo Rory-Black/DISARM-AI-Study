@@ -21,7 +21,13 @@ Run the interface's manual demo/smoke test (classifies a hardcoded sample articl
 python scripts/DISARM_LLM_Interface.py
 ```
 
-This executes `test_interface()` at the bottom of the file, which is currently the only way to exercise `DISARM_LLM` end-to-end. Edit the `DISARM_LLM(...)` construction there to switch between a local model and GPT.
+This executes `test_interface()` at the bottom of the file. Edit the `DISARM_LLM(...)` construction there to switch between a local model and GPT.
+
+Run the agent console (web GUI) — configure a run, feed it pasted/uploaded articles or the dataset, and watch the agent work step by step:
+
+```bash
+.venv/bin/python scripts/gui/app.py   # http://localhost:5000
+```
 
 Environment/external dependencies:
 - `OPENAI_API_KEY` must be set in the environment to use non-local models (`local_model=False`).
@@ -65,5 +71,18 @@ Free functions for working with DISARM/MITRE-style JSON objects: `get_mitre_exte
 - `euvsdisinfo.csv` — large (~130MB) source dataset of disinformation articles, presumably the input corpus for labeling/experiments.
 - `DISARM_DATA_MASTER.xlsx` — incidents database workbook used by `DISARMDataMaster`.
 
-### `scripts/collect/label_dataset.py` and `scripts/experiments/ZeDPEB.py`
-Both currently empty stub files. `ZeDPEB.py` is an experiment/benchmark (logs go to `scripts/experiments/.ZeDPEB_logs/`, gitignored except a `saved/` subfolder) intended to exercise the classification architectures above against the dataset; `label_dataset.py` is presumably for building/labeling the training or evaluation dataset from `.data/euvsdisinfo.csv`. Neither has an established interface yet — check with the user before assuming their intended shape.
+### `scripts/agent_events.py` — observer plumbing
+`EventBus` fans structured run events out to subscribers (each gets its own queue, and history is replayed on subscribe so a reconnecting client sees the whole run). `Cancelled` is raised inside a run when an observer asks it to stop.
+
+`DISARM_LLM` takes optional `on_event(event_type, **payload)` and `should_stop()` callbacks. Both default to no-ops, so the CLI paths are unchanged. The engine emits `task`, `plan`, `tactic_started`/`tactic_finished`, `techniques_identified`, `sub_techniques_identified`, `evidence_started`/`evidence_reported`, `search_round`/`search_results`/`search_failed`, `llm_call_started`/`llm_call_finished` and `classification_complete`; `should_stop()` is polled at loop boundaries (per tactic, per search round, per technique). `Log.add_sink(fn)` additionally forwards every log line to an observer.
+
+### `scripts/gui/` — the agent console
+- `app.py` — Flask backend. One run at a time via `RunManager`; progress streams to the browser over SSE at `/api/events` (history replayed on connect, so the page can be opened or reloaded mid-run). `POST /api/run/articles` classifies pasted/uploaded articles, `POST /api/run/dataset` drives `label_dataset.run_labelling`, `POST /api/stop` cancels. It `chdir`s to the repo root on import, because the engine reads `.data/` by relative path, and reads `.env` for `OPENAI_API_KEY`/`DIFFBOT_TOKEN`.
+- `catalog.py` — parses `.data/DISARM.json` into tactic/technique lookup tables so the GUI can show the name and description behind each bare external id.
+- `static/` — vanilla HTML/CSS/JS single page, no build step. The activity feed nests events into `<details>` groups (run root > article > tactic, plus a subgroup for the taxonomy sub-technique stage) built in `openArticleGroup`/`openTacticGroup`/`openSubTechniqueGroup`; `feed()` appends to the innermost open group. `techniqueCard()` renders one technique with its DISARM name, description and gathered evidence, and is shared by the Techniques tab and the expandable Articles rows (which scope it to one article via each evidence item's `articleKey`).
+
+### `scripts/collect/label_dataset.py`
+`run_labelling(...)` labels articles from the balanced subset and appends each result to a JSONL cache, skipping anything already cached — so a run can be stopped and resumed. It takes the same classification config as `DISARM_LLM` plus `architecture` (see the `ARCHITECTURES` dict), `limit`, `cache_path`, and the `on_event`/`should_stop` callbacks. `main()` keeps the original CLI behaviour. `export_splits()` writes the labelled CSV (named after its cache file) and the stratified train/dev split into `.data/experiments/`, skipping the split rather than raising when the cache is too partial to stratify.
+
+### `scripts/experiments/ZeDPEB.py`
+Currently an empty stub. An experiment/benchmark (logs go to `scripts/experiments/.ZeDPEB_logs/`, gitignored except a `saved/` subfolder) intended to exercise the classification architectures above against the dataset. No established interface yet — check with the user before assuming its intended shape.

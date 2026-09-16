@@ -6,3 +6,4 @@ matplotlib
 tqdm
 loguru
 scikit-learn
+flask
