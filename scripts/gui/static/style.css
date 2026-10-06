@@ -318,7 +318,7 @@ select { cursor: pointer; }
 .log-warn { color: var(--red); }
 
 /* --------------------------------------------------------------- summary */
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(195px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .sbox { background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 12px 14px; }
 .sbox b { display: block; font-size: 21px; font-variant-numeric: tabular-nums; }
 .sbox span { font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: .5px; }
@@ -350,3 +350,105 @@ details.artrow > summary:hover { background: var(--bg-hover); border-radius: var
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2b3545; border-radius: 5px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #3a4656; }
+
+/* --------------------------------------------------------------- database */
+.db-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.db-head h3 { margin: 0 0 3px; font-size: 15px; }
+.db-head button { margin-left: auto; flex: 0 0 auto; }
+
+.db-filters { flex-wrap: wrap; }
+.db-filters input { min-width: 240px; }
+.db-filters select { width: auto; min-width: 150px; }
+
+/* chart tokens - #3987e5 is the sequential blue validated for this dark surface
+   (OKLCH L 0.57, chroma 0.15, 4.0:1 on --bg-2); the track and gridline sit one
+   step off the surface so the data is the only loud thing */
+.viz {
+  --viz-bar: #3987e5;
+  --viz-track: #1c2330;
+  margin: 0 0 18px;
+  background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: var(--radius);
+  padding: 14px 16px 12px;
+}
+.viz figcaption { margin-bottom: 12px; }
+.viz figcaption h4 { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
+.viz figcaption .hint { margin: 0; }
+
+.viz-rows { display: flex; flex-direction: column; gap: 6px; }
+.viz-row {
+  display: grid; grid-template-columns: 74px minmax(150px, 1.1fr) 3fr 54px;
+  gap: 12px; align-items: center; cursor: pointer;
+  padding: 2px 4px; border-radius: 5px; border: 1px solid transparent;
+}
+.viz-row:hover { background: var(--bg-3); border-color: var(--line); }
+.viz-row.selected { background: var(--accent-soft); border-color: var(--accent); }
+.viz-row .v-id { font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
+.viz-row .v-name {
+  font-size: 12.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viz-row .v-track { display: block; background: var(--viz-track); border-radius: 2px; height: 14px; }
+/* 4px rounded data-end, square against the baseline it grows from */
+.viz-row .v-bar { display: block; background: var(--viz-bar); height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.viz-row .v-val {
+  font-family: var(--mono); font-size: 12px; color: var(--fg-dim); text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.linkish {
+  border: none; background: none; color: var(--accent); padding: 8px 4px 0;
+  font-size: 12px; cursor: pointer;
+}
+.linkish:hover { background: none; text-decoration: underline; }
+
+/* meter - a single ratio against the whole, on the same ramp as the bars */
+.meter { background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; }
+.meter-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--fg-dim); margin-bottom: 7px; }
+.meter-head b { color: var(--fg); font-size: 13px; }
+.meter-track { height: 10px; background: #1c2330; border-radius: 5px; overflow: hidden; }
+.meter-fill { height: 100%; background: #3987e5; border-radius: 5px 0 0 5px; }
+
+#vizTip {
+  position: fixed; z-index: 50; pointer-events: none; max-width: 330px;
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  box-shadow: 0 6px 22px rgba(0,0,0,.45);
+}
+#vizTip .t-id { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+#vizTip .t-desc { color: var(--fg-dim); margin-top: 4px; }
+
+.dbrow { background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: var(--radius); margin-bottom: 8px; }
+.dbrow > summary { padding: 11px 14px 11px 32px; cursor: pointer; list-style: none; position: relative; }
+.dbrow > summary::-webkit-details-marker { display: none; }
+.dbrow > summary::before { content: "\25B8"; position: absolute; left: 14px; top: 13px; color: var(--fg-faint); font-size: 11px; }
+.dbrow[open] > summary::before { content: "\25BE"; }
+.dbrow > summary:hover { background: var(--bg-hover); border-radius: var(--radius); }
+.dbrow-title { font-size: 13.5px; font-weight: 600; margin-bottom: 3px; }
+.dbrow-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--fg-faint); font-family: var(--mono); }
+.dbrow-body { padding: 4px 14px 16px 32px; border-top: 1px solid var(--line-soft); }
+.dbrow-body h5 { margin: 16px 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-faint); }
+.dbrow-body h5:first-child { margin-top: 10px; }
+.dbrow-body .tcard { background: var(--bg); }
+.chip {
+  display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--line-soft);
+}
+.chip.disinfo { color: #ffb4ae; border-color: rgba(248,81,73,.35); }
+.chip.trust { color: #8ae09a; border-color: rgba(63,185,80,.35); }
+
+.kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 12.5px; }
+.kv dt { color: var(--fg-faint); }
+.kv dd { margin: 0; word-break: break-word; }
+.kv dd .query { margin-bottom: 3px; }
+/* a long run can issue dozens of queries - keep the row from growing without bound */
+.kv dd.scrolly { max-height: 190px; overflow-y: auto; }
+.kv dd a { color: var(--cyan); text-decoration: none; }
+.kv dd a:hover { text-decoration: underline; }
+
+.articletext {
+  margin-top: 8px; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line-soft);
+  border-radius: 6px; font-size: 13px; line-height: 1.65; white-space: pre-wrap;
+  max-height: 340px; overflow-y: auto;
+}
+
+.pager { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 14px 0 4px; }
+.pager span { font-size: 12px; color: var(--fg-dim); }

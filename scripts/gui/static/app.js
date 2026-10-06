@@ -38,6 +38,16 @@ const state = {
   evidenceContext: [], // techniques the current evidence round is researching
   feedGroup: { article: null, tactic: null }, // open activity groups that events nest into
   expanded: new Set(), // article keys expanded on the Articles tab
+  db: {
+    data: null,
+    loading: false,
+    page: 1,
+    pageSize: 20,
+    filters: { q: "", technique: "", language: "", publisher: "", label: "", sort: "recent" },
+    expanded: new Set(), // article ids opened in the database list
+    entries: {}, // article_id -> the full row, fetched when a row is first opened
+    showAllTechniques: false,
+  },
 };
 
 /* ------------------------------------------------------------------ setup */
@@ -144,6 +154,7 @@ function handle(ev) {
         "accent",
         "Dataset labelling started",
         `${ev.queued} article(s) queued · ${ev.already_labelled} already in cache · ${ev.total} in subset` +
+          (ev.language ? ` · language: <b>${esc(ev.language)}</b>` : "") +
           `<div class="code" style="margin-top:4px;color:var(--fg-faint)">${esc(ev.cache_path)}</div>`,
         ev.ts
       );
@@ -154,6 +165,8 @@ function handle(ev) {
       break;
 
     case "dataset_finished":
+      state.db.entries = {};
+      if (state.db.data) loadDatabase();
       feed(
         "✔",
         "green",
@@ -827,6 +840,7 @@ document.querySelectorAll("#mainTabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("#mainTabs button").forEach((b) => b.classList.toggle("active", b === btn));
     document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.dataset.panel === btn.dataset.tab));
+    if (btn.dataset.tab === "database" && !state.db.data) loadDatabase();
   });
 });
 
@@ -866,6 +880,22 @@ async function refreshDatasetSummary() {
     $("datasetSummary").innerHTML = s.subset_exists
       ? `Cache holds <b>${s.labelled}</b> labelled article(s)${s.total ? ` of <b>${s.total}</b> in the subset` : ""}.<br><span class="code">${esc(s.cache_path)}</span>`
       : `<span class="warn">Subset not found — it will be built from the full dataset on the first run.</span>`;
+
+    // keep whatever language was already picked, so a refresh does not reset the choice
+    const select = $("datasetLanguage");
+    const chosen = select.value;
+    const total = (s.languages || []).reduce((n, row) => n + row.remaining, 0);
+    select.innerHTML =
+      `<option value="">All languages (${total.toLocaleString()} unlabelled)</option>` +
+      (s.languages || [])
+        .map(
+          (row) =>
+            `<option value="${esc(row.language)}"${row.remaining ? "" : " disabled"}>` +
+            `${esc(row.language)} — ${row.remaining.toLocaleString()} unlabelled of ${row.total.toLocaleString()}` +
+            `</option>`
+        )
+        .join("");
+    select.value = chosen;
   } catch {
     $("datasetSummary").textContent = "";
   }
@@ -942,7 +972,12 @@ $("runBtn").addEventListener("click", async () => {
   let url, body;
   if (source === "dataset") {
     url = "/api/run/dataset";
-    body = { config, limit: $("limit").value || null, export: $("export").checked };
+    body = {
+      config,
+      limit: $("limit").value || null,
+      language: $("datasetLanguage").value || null,
+      export: $("export").checked,
+    };
   } else {
     const articles =
       source === "paste"
@@ -969,3 +1004,375 @@ $("stopBtn").addEventListener("click", () => fetch("/api/stop", { method: "POST"
 $("logClear").addEventListener("click", () => ($("logbox").innerHTML = ""));
 
 init();
+
+
+/* ==================================================================== database
+   Browses the labelled cache (.data/euvsdisinfo_cache.json): what the run produced,
+   how the DISARM labels are distributed across it, and - per article - the evidence
+   the agent gathered to arrive at them. */
+
+const DB_TOP_N = 15;
+
+function dbQuery(extra = {}) {
+  const f = state.db.filters;
+  const params = new URLSearchParams({
+    page: state.db.page,
+    page_size: state.db.pageSize,
+    sort: f.sort,
+    ...extra,
+  });
+  for (const key of ["q", "technique", "language", "publisher", "label"]) {
+    if (f[key]) params.set(key, f[key]);
+  }
+  return params.toString();
+}
+
+async function loadDatabase() {
+  if (state.db.loading) return;
+  state.db.loading = true;
+  try {
+    const data = await fetch(`/api/cache?${dbQuery()}`).then((r) => r.json());
+    state.db.data = data;
+    renderDatabase();
+  } catch (e) {
+    $("dbPath").innerHTML = `<span style="color:var(--red)">Could not read the cache: ${esc(e.message)}</span>`;
+  } finally {
+    state.db.loading = false;
+  }
+}
+
+function renderDatabase() {
+  const data = state.db.data;
+  if (!data) return;
+
+  $("badgeDb").textContent = data.total;
+  $("dbPath").innerHTML =
+    `<span class="code">${esc(data.cache_path)}</span> · ${data.total.toLocaleString()} labelled article(s)` +
+    (data.exists ? "" : ` · <span style="color:var(--amber)">file does not exist yet</span>`);
+  $("dbEmpty").hidden = data.total > 0;
+
+  renderDbStats(data.stats);
+  renderDbChart(data.stats);
+  renderDbFacets(data);
+  renderDbEntries(data);
+}
+
+function renderDbStats(stats) {
+  const tiles = [
+    [stats.labelled.toLocaleString(), "Labelled articles"],
+    [stats.coverage != null ? `${stats.coverage}%` : "—", `Of the ${(stats.subset_total || 0).toLocaleString()}-article subset`],
+    [stats.distinct_techniques, "Distinct techniques"],
+    [stats.avg_techniques, "Techniques per article"],
+    [stats.articles_with_evidence.toLocaleString(), "With gathered evidence"],
+    [stats.articles_without_techniques.toLocaleString(), "Labelled with nothing"],
+  ];
+  $("dbStats").innerHTML = tiles.map(([v, l]) => `<div class="sbox"><b>${v}</b><span>${esc(l)}</span></div>`).join("");
+
+  // a single ratio against the whole, so a meter rather than a two-slice pie
+  const total = stats.disinformation + stats.trustworthy;
+  const pct = total ? (100 * stats.disinformation) / total : 0;
+  $("dbMeter").innerHTML = total
+    ? `<div class="meter"><div class="meter-head">` +
+      `<b>Disinformation share of the labelled cache</b>` +
+      `<span>${stats.disinformation.toLocaleString()} disinformation · ${stats.trustworthy.toLocaleString()} trustworthy · ${pct.toFixed(1)}%</span>` +
+      `</div><div class="meter-track"><div class="meter-fill" style="width:${pct}%"></div></div></div>`
+    : "";
+}
+
+function renderDbChart(stats) {
+  const counts = stats.technique_counts || [];
+  const chart = $("dbChart");
+  chart.hidden = counts.length === 0;
+  if (!counts.length) return;
+
+  // >7 meaningful classes, so this is a table + chart: the bar carries the comparison,
+  // the id and name carry identity, the count column carries the exact value
+  const shown = state.db.showAllTechniques ? counts : counts.slice(0, DB_TOP_N);
+  const max = counts[0].count || 1;
+  const labelled = stats.labelled || 1;
+
+  $("dbChartSub").textContent =
+    `${counts.length} distinct technique(s) across ${stats.total_tags.toLocaleString()} label(s). ` +
+    `Select a row to filter the articles below.`;
+
+  $("dbChartRows").innerHTML = shown
+    .map((row) => {
+      const t = techInfo(row.external_id);
+      const selected = state.db.filters.technique === row.external_id;
+      return (
+        `<div class="viz-row ${selected ? "selected" : ""}" role="row" data-tech-row="${esc(row.external_id)}" ` +
+        `tabindex="0" aria-label="${esc(row.external_id)} ${esc(t.name)}, ${row.count} articles">` +
+        `<span class="v-id">${esc(row.external_id)}</span>` +
+        `<span class="v-name">${esc(t.name)}</span>` +
+        `<span class="v-track"><span class="v-bar" style="width:${(100 * row.count) / max}%"></span></span>` +
+        `<span class="v-val">${row.count}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+
+  const toggle = $("dbChartToggle");
+  toggle.hidden = counts.length <= DB_TOP_N;
+  toggle.textContent = state.db.showAllTechniques
+    ? `Show only the top ${DB_TOP_N}`
+    : `Show all ${counts.length} techniques`;
+
+  // share of articles, for the hover layer
+  $("dbChartRows").dataset.labelled = labelled;
+}
+
+function renderDbFacets(data) {
+  const fill = (id, options, current, allLabel) => {
+    const select = $(id);
+    select.innerHTML =
+      `<option value="">${allLabel}</option>` +
+      options.map((o) => `<option value="${esc(o.value)}">${esc(o.value)} (${o.count})</option>`).join("");
+    select.value = current;
+  };
+
+  const f = state.db.filters;
+  fill("dbLanguage", data.facets.languages, f.language, "All languages");
+  fill("dbPublisher", data.facets.publishers, f.publisher, "All publishers");
+
+  const techSelect = $("dbTechnique");
+  techSelect.innerHTML =
+    `<option value="">All techniques</option>` +
+    (data.stats.technique_counts || [])
+      .map((row) => `<option value="${esc(row.external_id)}">${esc(row.external_id)} — ${esc(techInfo(row.external_id).name)} (${row.count})</option>`)
+      .join("");
+  techSelect.value = f.technique;
+
+  $("dbSearch").value = f.q;
+  $("dbLabel").value = f.label;
+  $("dbSort").value = f.sort;
+
+  const active = Object.entries(f).filter(([k, v]) => v && k !== "sort");
+  $("dbActiveFilter").innerHTML = active.length
+    ? `<p class="hint" style="margin:0 0 10px">Showing <b>${data.filtered.toLocaleString()}</b> of ${data.total.toLocaleString()} · ` +
+      active.map(([k, v]) => `${k}: <span class="code">${esc(v)}</span>`).join(" · ") +
+      ` · <button class="linkish" id="dbClear" style="padding:0">clear filters</button></p>`
+    : "";
+}
+
+function renderDbEntries(data) {
+  $("dbEntries").innerHTML = data.entries
+    .map((entry) => {
+      const id = entry.article_id;
+      const open = state.db.expanded.has(id);
+      const isDisinfo = String(entry.label ?? entry.class) === "1";
+      return (
+        `<details class="dbrow" ${open ? "open" : ""}>` +
+        `<summary data-dbkey="${esc(id)}">` +
+        `<div class="dbrow-title">${esc(entry.article_title || "(untitled)")}</div>` +
+        `<div class="dbrow-meta">` +
+        `<span class="chip ${isDisinfo ? "disinfo" : "trust"}">${isDisinfo ? "disinformation" : "trustworthy"}</span>` +
+        `<span>${esc(entry.article_publisher || entry.article_domain || "unknown source")}</span>` +
+        `<span>${esc(entry.language || "")}</span>` +
+        `<span>${esc(entry.debunk_date || "")}</span>` +
+        `<span>${(entry.chars || 0).toLocaleString()} chars</span>` +
+        `<span>${entry.technique_count} technique(s)</span>` +
+        (entry.evidence_count ? `<span style="color:var(--purple)">${entry.evidence_count} evidence item(s)</span>` : "") +
+        `</div>` +
+        (entry.disarm_techniques?.length ? `<div class="tcard-meta">${tagList(entry.disarm_techniques)}</div>` : "") +
+        `</summary>` +
+        `<div class="dbrow-body" data-dbbody="${esc(id)}">${dbBodyHTML(id, entry)}</div>` +
+        `</details>`
+      );
+    })
+    .join("");
+
+  const pages = data.pages;
+  $("dbPager").innerHTML =
+    data.filtered > data.page_size
+      ? `<button id="dbPrev" ${data.page <= 1 ? "disabled" : ""}>← Previous</button>` +
+        `<span>Page ${data.page} of ${pages} · ${data.filtered.toLocaleString()} article(s)</span>` +
+        `<button id="dbNext" ${data.page >= pages ? "disabled" : ""}>Next →</button>`
+      : "";
+}
+
+// the body is filled in once the full row (article text, evidence) has been fetched
+function dbBodyHTML(id, light) {
+  const full = state.db.entries[id];
+  if (!full) return `<p class="hint" style="margin-top:10px">Loading…</p>`;
+
+  const evidence = full.disarm_evidence || [];
+  const meta = full.disarm_meta || {};
+  const techniques = full.disarm_techniques || [];
+
+  const techniqueCards = techniques.length
+    ? techniques.map((tid) => techniqueCard(tid, { evidence: evidence.filter((e) => e.external_id === tid) })).join("")
+    : `<p class="hint">The agent identified no techniques in this article.</p>`;
+
+  // evidence the agent gathered for a technique it then did NOT label
+  const unusedEvidence = evidence.filter((e) => !techniques.includes(e.external_id));
+
+  return (
+    `<h5>Article</h5>` +
+    `<dl class="kv">` +
+    `<dt>Article id</dt><dd class="code">${esc(full.article_id)}</dd>` +
+    `<dt>Publisher</dt><dd>${esc(full.article_publisher || "—")}${full.article_domain ? ` · ${esc(full.article_domain)}` : ""}</dd>` +
+    (full.article_url ? `<dt>URL</dt><dd><a href="${esc(full.article_url)}" target="_blank" rel="noreferrer">${esc(full.article_url)}</a></dd>` : "") +
+    `<dt>Language</dt><dd>${esc(full.language || full.article_language || "—")}</dd>` +
+    `<dt>EUvsDisinfo class</dt><dd>${String(full.label ?? full.class) === "1" ? "disinformation" : "trustworthy"}</dd>` +
+    (full.keywords ? `<dt>Keywords</dt><dd>${esc(full.keywords)}</dd>` : "") +
+    (full.debunk_date ? `<dt>Debunk date</dt><dd>${esc(full.debunk_date)}</dd>` : "") +
+    `</dl>` +
+    `<div class="articletext">${esc(full.text || "")}</div>` +
+    `<h5>DISARM techniques identified (${techniques.length})</h5>` +
+    techniqueCards +
+    (unusedEvidence.length
+      ? `<h5>Evidence gathered for techniques that were not labelled (${unusedEvidence.length})</h5>` +
+        unusedEvidence
+          .map(
+            (e) =>
+              `<div class="ecard"><h4><span class="tcard-id">${esc(e.external_id)}</span> <span>${esc(techInfo(e.external_id).name)}</span></h4>` +
+              `<div class="findings">${esc(e.findings)}</div>` +
+              (e.sources?.length
+                ? `<div class="sources">${e.sources.map((u) => `<a href="${esc(u)}" target="_blank" rel="noreferrer">${esc(u)}</a>`).join("")}</div>`
+                : "") +
+              `</div>`
+          )
+          .join("")
+      : "") +
+    `<h5>How it was labelled</h5>` +
+    (Object.keys(meta).length
+      ? `<dl class="kv">` +
+        `<dt>Model</dt><dd class="code">${esc(meta.model || "—")}</dd>` +
+        `<dt>Mode</dt><dd>${esc(meta.mode || "—")}</dd>` +
+        `<dt>Architecture</dt><dd class="code">${esc(meta.architecture || "—")}</dd>` +
+        `<dt>Web search</dt><dd>${meta.web_search ? "on" : "off"}</dd>` +
+        `<dt>Sub-techniques</dt><dd>${meta.check_sub_techniques ? "checked" : "parents only"}</dd>` +
+        `<dt>Labelled at</dt><dd class="code">${esc(meta.labelled_at || "—")}</dd>` +
+        (meta.duration_s ? `<dt>Took</dt><dd>${secs(meta.duration_s)}</dd>` : "") +
+        (meta.search_queries?.length
+          ? `<dt>Searches run (${meta.search_queries.length})</dt>` +
+            `<dd class="scrolly">${meta.search_queries.map((q) => `<div class="query">${esc(q)}</div>`).join("")}</dd>`
+          : "") +
+        `</dl>`
+      : `<p class="hint">This row was labelled before the cache recorded provenance, so there is no model, ` +
+        `evidence or search history stored for it. Rows labelled from now on will have it.</p>`)
+  );
+}
+
+async function openDbRow(id) {
+  if (!state.db.entries[id]) {
+    try {
+      const full = await fetch(`/api/cache/entry?article_id=${encodeURIComponent(id)}`).then((r) => r.json());
+      if (full.error) throw new Error(full.error);
+      state.db.entries[id] = full;
+    } catch (e) {
+      const body = document.querySelector(`[data-dbbody="${CSS.escape(id)}"]`);
+      if (body) body.innerHTML = `<p class="hint" style="color:var(--red)">Could not load this row: ${esc(e.message)}</p>`;
+      return;
+    }
+  }
+  const body = document.querySelector(`[data-dbbody="${CSS.escape(id)}"]`);
+  if (body) body.innerHTML = dbBodyHTML(id, null);
+}
+
+function dbApply(patch, { resetPage = true } = {}) {
+  Object.assign(state.db.filters, patch);
+  if (resetPage) state.db.page = 1;
+  loadDatabase();
+}
+
+/* ---- database wiring ---- */
+
+$("dbRefresh").addEventListener("click", () => {
+  state.db.entries = {}; // the file may have grown, so drop the per-row cache too
+  loadDatabase();
+});
+
+let dbSearchTimer = null;
+$("dbSearch").addEventListener("input", (e) => {
+  clearTimeout(dbSearchTimer);
+  const value = e.target.value;
+  dbSearchTimer = setTimeout(() => dbApply({ q: value }), 250);
+});
+$("dbTechnique").addEventListener("change", (e) => dbApply({ technique: e.target.value }));
+$("dbLanguage").addEventListener("change", (e) => dbApply({ language: e.target.value }));
+$("dbPublisher").addEventListener("change", (e) => dbApply({ publisher: e.target.value }));
+$("dbLabel").addEventListener("change", (e) => dbApply({ label: e.target.value }));
+$("dbSort").addEventListener("change", (e) => dbApply({ sort: e.target.value }));
+
+$("dbChartToggle").addEventListener("click", () => {
+  state.db.showAllTechniques = !state.db.showAllTechniques;
+  renderDbChart(state.db.data.stats);
+});
+
+// clicking a bar filters the list to that technique; clicking it again clears it
+$("dbChartRows").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-tech-row]");
+  if (!row) return;
+  const id = row.dataset.techRow;
+  dbApply({ technique: state.db.filters.technique === id ? "" : id });
+});
+$("dbChartRows").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    e.target.closest("[data-tech-row]")?.click();
+  }
+});
+
+$("dbActiveFilter").addEventListener("click", (e) => {
+  if (e.target.id !== "dbClear") return;
+  state.db.filters = { q: "", technique: "", language: "", publisher: "", label: "", sort: state.db.filters.sort };
+  state.db.page = 1;
+  loadDatabase();
+});
+
+$("dbPager").addEventListener("click", (e) => {
+  if (e.target.id === "dbPrev") state.db.page = Math.max(1, state.db.page - 1);
+  else if (e.target.id === "dbNext") state.db.page = Math.min(state.db.data.pages, state.db.page + 1);
+  else return;
+  loadDatabase();
+  document.querySelector(".panels").scrollTop = 0;
+});
+
+$("dbEntries").addEventListener("click", (e) => {
+  const summary = e.target.closest("summary[data-dbkey]");
+  if (!summary) return;
+  if (e.target.closest(".tag[data-tech]")) {
+    e.preventDefault();
+    return;
+  }
+  const id = summary.dataset.dbkey;
+  if (state.db.expanded.has(id)) {
+    state.db.expanded.delete(id);
+  } else {
+    state.db.expanded.add(id);
+    openDbRow(id);
+  }
+});
+
+/* ---- the chart's hover layer ---- */
+
+const vizTip = document.createElement("div");
+vizTip.id = "vizTip";
+vizTip.hidden = true;
+document.body.appendChild(vizTip);
+
+$("dbChartRows").addEventListener("mousemove", (e) => {
+  const row = e.target.closest("[data-tech-row]");
+  if (!row) {
+    vizTip.hidden = true;
+    return;
+  }
+  const id = row.dataset.techRow;
+  const t = techInfo(id);
+  const count = Number(row.querySelector(".v-val").textContent);
+  const labelled = Number($("dbChartRows").dataset.labelled) || 1;
+  vizTip.innerHTML =
+    `<div><span class="t-id">${esc(id)}</span> ${esc(t.name)}</div>` +
+    `<div>${count} of ${labelled} labelled article(s) · ${((100 * count) / labelled).toFixed(1)}%</div>` +
+    `<div class="t-desc">${esc(truncateText(t.description, 180))}</div>`;
+  vizTip.hidden = false;
+  // keep the tip on screen near the cursor
+  const x = Math.min(e.clientX + 14, window.innerWidth - vizTip.offsetWidth - 10);
+  const y = Math.min(e.clientY + 16, window.innerHeight - vizTip.offsetHeight - 10);
+  vizTip.style.left = `${x}px`;
+  vizTip.style.top = `${y}px`;
+});
+$("dbChartRows").addEventListener("mouseleave", () => (vizTip.hidden = true));
+
+const truncateText = (text, n) => (!text ? "" : text.length <= n ? text : text.slice(0, n).trimEnd() + "…");

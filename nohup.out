@@ -1,0 +1,667 @@
+[INFO] API key exists: True
+[INFO] API key length: 164
+ * Tip: There are .env files present. Install python-dotenv to use them.
+DISARM agent GUI -> http://127.0.0.1:5000
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [16/Sep/2026 16:06:42] "[36mGET / HTTP/1.1[0m" 304 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "[36mGET /style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "[36mGET /app.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "GET /api/framework HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "GET /api/defaults HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "GET /api/events HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:06:42] "GET /api/dataset/summary HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:06:45] "GET /api/cache?page=1&page_size=20&sort=recent HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:12] "GET /api/events HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:26] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:26] "[36mGET /style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [16/Sep/2026 16:08:27] "[36mGET /app.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [16/Sep/2026 16:08:27] "GET /api/defaults HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:27] "GET /api/framework HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:27] "GET /api/dataset/summary HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:08:27] "GET /api/events HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:09:00] "GET /api/dataset/summary HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:09:18] "POST /api/run/dataset HTTP/1.1" 200 -
+  0%|          | 0/1 [00:00<?, ?it/s][INFO] Testing for tactic: plan-strategy
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0073', 'T0074']
+[RESPONSE] {
+"Techniques": []
+}
+
+[INFO] Done in 0.67 seconds
+[INFO] Identified Techniques: []
+[INFO] Testing for tactic: plan-objectives
+[INFO] Techniques requiring OSINT evidence: ['T0002', 'T0066', 'T0078', 'T0079', 'T0139']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['refugees deported from Norway Murmansk nightclub groping', 'Murmansk nightclub refugees 33 arrested 18 hospitalized', "refugees Murmansk nightclub Cologne New Year's Eve comparison", "source of 'Europe Take Note: Refugees Molest Russian Women' article"]
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0002",
+    "findings": "The article's central claim\u2014that refugees were beaten by Russian vigilantes in Murmansk for harassing women\u2014has been identified by fact-checking organizations (StopFake) as part of a pattern of Russian media spreading distorted or fabricated stories about Muslim migrants sexually assaulting European women to stoke anti-immigrant fears. While the specific Murmansk story is directly linked to a site called 'Russia Insider', the search results indicate that similar narratives (e.g., the #sorry flashmob) were widely distributed across Russian media and social media to promote pro-state/anti-migrant messaging.",
+    "sources": [
+      "https://www.stopfake.org/en/fake-russian-story-stokes-anti-immigrant-fears/"
+    ]
+  },
+  {
+    "external_id": "T0066",
+    "findings": "The article seeks to degrade the image of European leaders and societies by describing them as 'incompetent,' 'wimpy,' and 'bullied into submission,' while portraying Russia as a place of 'justice' and 'common sense.' It uses the alleged incident to characterize European political correctness as a weakness that allows 'waves of refugees' to 'hold an entire continent hostage,' thereby targeting the reputation and governance of Western European nations.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0078",
+    "findings": "No direct evidence was found in the text or search results that the article itself is threatening journalists or news outlets. However, the article uses a confrontational tone ('Ball's in your wimpy court, Europe') directed at European institutions.",
+    "sources": []
+  },
+  {
+    "external_id": "T0079",
+    "findings": "The article is designed to create conflict between subgroups by contrasting 'civilized' Russian vigilante justice with the perceived failure of 'incompetent' Western European leaders and 'obtuse political correctness.' It frames the presence of refugees as a threat to European women and social order, explicitly aiming to widen the division between native populations and migrants.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0139",
+    "findings": "The article attempts to dissuade European leaders and citizens from maintaining current immigration and integration policies by portraying them as ineffective and dangerous. By labeling European responses as 'wimpy' and highlighting 'chaos,' it aims to make targets (leaders and voters) question the morality and utility of their current approach to migration.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  }
+]
+[INFO] Evidence gathering done in 38.26 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0002', 'T0066', 'T0075', 'T0076', 'T0077', 'T0078', 'T0079', 'T0135', 'T0136', 'T0137', 'T0138', 'T0139', 'T0140']
+[RESPONSE] {
+"Techniques": ["T0002", "T0066", "T0076", "T0079", "T0139"]
+}
+
+[INFO] Done in 2.43 seconds
+[INFO] Identified Techniques: ['T0002', 'T0066', 'T0076', 'T0079', 'T0139']
+[INFO] Testing for tactic: microtarget
+[INFO] Techniques requiring OSINT evidence: ['T0018', 'T0101']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugee assault 50 refugees Norway deportation', 'refugees deported from Norway Murmansk nightclub assault', 'Murmansk nightclub refugees beaten by Russians']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0018",
+    "findings": "No evidence was found in the provided search results to suggest that the article or its claims were part of a paid targeted advertisement campaign. The search results focus on news reports regarding the content of the article itself and related migration issues.",
+    "sources": []
+  },
+  {
+    "external_id": "T0101",
+    "findings": "The article's claims regarding a group of 50 'refugees' deported from Norway being beaten in a Murmansk nightclub appear to originate from or be hosted by 'Russia Insider' (russia-insider.com). While the article uses a tone designed to appeal to specific anti-immigration sentiments, the search results do not provide direct evidence of a coordinated 'localised content' operation using specific dialects or local news to blend in, although the content is clearly tailored to a specific political perspective. Note that the specific event described in the article is found in a search result from Russia Insider, which matches the article text almost verbatim, suggesting the article is a republication of that specific source's content.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  }
+]
+[INFO] Evidence gathering done in 17.51 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0016', 'T0018', 'T0101', 'T0102']
+[RESPONSE] {
+"Techniques": ["T0016"]
+}
+
+[INFO] Done in 1.04 seconds
+[INFO] Identified Techniques: ['T0016']
+[INFO] Testing for tactic: develop-content
+[INFO] Techniques requiring OSINT evidence: ['T0015', 'T0084', 'T0089']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees groping 50 people Russians beating', 'refugees deported from Norway Murmansk nightclub incident', 'Murmansk nightclub refugees 33 arrested 18 hospital', 'refugees groping women Murmansk nightclub report']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0015",
+    "findings": "No evidence was found in the provided article or search results indicating the use of specific hashtags or hashtag groups designed to promote a fabricated event or manage conversation.",
+    "sources": []
+  },
+  {
+    "external_id": "T0084",
+    "findings": "The article appears to be a direct reproduction or near-verbatim copy of an article published by 'Russia Insider' on February 7, 2016, titled \"'Refugees' Harass Women in Russian Nightclub, Are Promptly Beaten and Sent to Prison\". The text in the provided article matches the content of the Russia Insider article, including the specific phrasing about the 50 refugees from Norway, the Murmansk nightclub, the comparison to Cologne, and the details of the arrests and hospitalizations.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0089",
+    "findings": "No evidence was found that the article relies on the procurement or use of private or non-public documents. The content describes a public event (alleged nightclub incident and arrests) and does not reference any leaked or non-public documentation.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 19.63 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0015', 'T0023', 'T0084', 'T0085', 'T0086', 'T0087', 'T0088', 'T0089']
+[RESPONSE] {
+"Techniques": ["T0023", "T0084", "T0085"]
+}
+
+[INFO] Done in 1.7 seconds
+[INFO] Identified Techniques: ['T0023', 'T0084', 'T0085']
+[INFO] Testing for tactic: select-channels-and-affordances
+[INFO] Techniques requiring OSINT evidence: ['T0029', 'T0107', 'T0109', 'T0110', 'T0151', 'T0152', 'T0153', 'T0155']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees deported from Norway assault', 'refugees Murmansk nightclub 33 arrested', 'Murmansk refugees 50 groping women']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0029",
+    "findings": "No evidence found in the article or search results indicating the use of fake or manipulated online polls.",
+    "sources": []
+  },
+  {
+    "external_id": "T0107",
+    "findings": "No evidence found in the article or search results indicating the use of bookmarking or content curation platforms (e.g., Pinterest, Flipboard) to spread this content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0109",
+    "findings": "No evidence found in the article or search results indicating the use of consumer review networks (e.g., Yelp, TripAdvisor) for this content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0110",
+    "findings": "No evidence found in the article or search results indicating the use of formal diplomatic channels to communicate this content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0151",
+    "findings": "No evidence found in the article or search results indicating that the content is being distributed via a Digital Community Hosting Asset designed for user interaction (e.g., chat rooms, social feeds).",
+    "sources": []
+  },
+  {
+    "external_id": "T0152",
+    "findings": "The article is hosted on 'russia-insider.com', which functions as a Digital Content Hosting Asset (a website designed to allow the uploading and hosting of text-based content).",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0153",
+    "findings": "The article is delivered via the 'russia-insider.com' website, which serves as a Digital Content Delivery Asset for transmitting information to online users.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0155",
+    "findings": "No evidence found in the article or search results indicating that the content is behind a 'gated' asset (e.g., password protection, geographic restrictions, or financial requirements).",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 31.33 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0029', 'T0107', 'T0109', 'T0110', 'T0111', 'T0151', 'T0152', 'T0153', 'T0154', 'T0155']
+[RESPONSE] {
+"Techniques": ["T0152", "T0153"]
+}
+
+[INFO] Done in 1.41 seconds
+[INFO] Identified Techniques: ['T0152', 'T0153']
+[INFO] Testing for tactic: conduct-pump-priming
+[INFO] Techniques requiring OSINT evidence: ['T0020', 'T0044', 'T0046']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees deported Norway groping assault', 'Murmansk refugees 33 arrested nightclub', 'Russia refugees deported Norway Murmansk incident', 'Murmansk nightclub refugees 50 people 18 hospitalized']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0020",
+    "findings": "No evidence was found in the provided article or search results to indicate that the content was subject to iterative A/B testing for engagement metrics, headline performance, or conversion rates. The article appears to be a single piece of commentary.",
+    "sources": []
+  },
+  {
+    "external_id": "T0044",
+    "findings": "The search results do not provide information regarding the timing or variety of messages released in the early hours of the alleged Murmansk incident. While the search results discuss general migrant tensions between Russia and Norway (e.g., in 2011 and 2015), they do not confirm if this specific story was part of a coordinated 'seed distortion' campaign.",
+    "sources": []
+  },
+  {
+    "external_id": "T0046",
+    "findings": "No evidence was found to support the claim that the article or its source manipulated engagement metrics on platforms like Reddit or Twitter to influence Google search results or news alerts. The search results did not return any reports of 'Black-hat SEO' or coordinated manipulation related to this specific claim.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 16.59 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0020', 'T0042', 'T0044', 'T0045', 'T0046']
+[RESPONSE] {
+"Techniques": ["T0042"]
+}
+
+[INFO] Done in 0.86 seconds
+[INFO] Identified Techniques: ['T0042']
+[INFO] Testing for tactic: deliver-content
+[INFO] Techniques requiring OSINT evidence: ['T0114', 'T0115', 'T0116', 'T0117']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ["source of article 'Europe Take Note: ‘Refugees’ Molest Russian Women'", "'refugees' deported from Norway Murmansk nightclub", 'Murmansk nightclub refugees groping Russian men beating', "who published 'Europe Take Note: ‘Refugees’ Molest Russian Women'"]
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0114",
+    "findings": "No evidence was found to indicate that the provided article text was delivered via paid media or advertising. The search results identify the source of the story as 'Russia Insider', which appears to be an owned media platform rather than a paid advertisement.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0115",
+    "findings": "The article is published on 'Russia Insider' (russia-insider.com), which is an owned media asset. The content uses inflammatory language (e.g., 'wimpy court', 'bullied into submission') and targets specific groups ('refugees') to provoke a response, which aligns with the description of delivering content via owned media assets.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  },
+  {
+    "external_id": "T0116",
+    "findings": "No specific evidence was found in the article or search results regarding the use of inauthentic accounts, bots, or paid actors to comment on or reply to this specific content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0117",
+    "findings": "No evidence was found that this specific article successfully attracted the attention of or was reported on by traditional (earned) media outlets. While search results show fact-checking sites like 'StopFake' addressing similar disinformation narratives, they do not specifically mention this exact article being picked up by traditional mainstream media.",
+    "sources": [
+      "https://www.stopfake.org/en/fake-russian-story-stokes-anti-immigrant-fears/"
+    ]
+  }
+]
+[INFO] Evidence gathering done in 25.98 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0114', 'T0115', 'T0116', 'T0117']
+[RESPONSE] {
+"Techniques": ["T0115"]
+}
+
+[INFO] Done in 0.93 seconds
+[INFO] Identified Techniques: ['T0115']
+[INFO] Testing for tactic: drive-offline-activity
+[INFO] Techniques requiring OSINT evidence: ['T0017', 'T0057', 'T0061', 'T0126', 'T0127']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['refugees deported from Norway Murmansk nightclub incident', 'refugees Murmansk nightclub groping Russians beating 33 arrested', 'Murmansk nightclub refugees incident 18 refugees hospital']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0017",
+    "findings": "No evidence was found in the article or search results indicating that the text is part of a fundraising campaign, nor are there mentions of crowdfunding services like Patreon or GoFundMe associated with this content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0057",
+    "findings": "No evidence was found that this article is coordinating or promoting real-world rallies, protests, or gatherings. While the article describes a past event of vigilante violence, it does not contain calls to organize new events.",
+    "sources": []
+  },
+  {
+    "external_id": "T0061",
+    "findings": "No evidence was found that the article or its associated actors are using this narrative to sell merchandise.",
+    "sources": []
+  },
+  {
+    "external_id": "T0126",
+    "findings": "No evidence was found that the article issues direct calls to action or provides logistical support to encourage attendance at real-world events.",
+    "sources": []
+  },
+  {
+    "external_id": "T0127",
+    "findings": "The article describes a specific instance of physical violence where 'a group of male Russians' took refugees to the street and gave them a 'beating they will remember,' resulting in 18 people being hospitalized. The article explicitly states, 'We don't want to romanticize vigilante justice, but in a civilized society, assaulting women... should have swift, painful consequences,' which suggests an endorsement or encouragement of such violence to draw attention to its narrative.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  }
+]
+[INFO] Evidence gathering done in 23.17 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0017', 'T0057', 'T0061', 'T0126', 'T0127']
+[RESPONSE] {
+"Techniques": ["T0127"]
+}
+
+[INFO] Done in 1.06 seconds
+[INFO] Identified Techniques: ['T0127']
+[INFO] Testing for tactic: persist-in-the-information-environment
+[INFO] Techniques requiring OSINT evidence: ['T0128', 'T0129', 'T0130', 'T0131']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees deported from Norway groping women', 'refugees Murmansk nightclub 33 arrested 18 hospital', 'Murmansk nightclub incident refugees 2015 2016']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0128",
+    "findings": "No evidence was found to suggest that the identity or provenance of the information assets (the article or its publisher) was being concealed through falsified personas or repurposed assets. The article appears to be from 'Russia Insider', an identifiable outlet.",
+    "sources": []
+  },
+  {
+    "external_id": "T0129",
+    "findings": "No evidence was found to suggest the campaign was attempting to conceal its operational activity by mixing content with unrelated topics or using private channels to hide its identity. However, investigations into the claim itself suggest the story may be based on a significant exaggeration of a real event (changing 'up to five' refugees to '50' or '51'), which is a common characteristic of disinformation, though this specifically relates to content veracity rather than operational concealment.",
+    "sources": [
+      "https://www.unz.com/article/the-muslim-rape-army-is-coming-to-getcha/"
+    ]
+  },
+  {
+    "external_id": "T0130",
+    "findings": "No evidence was found to suggest that the infrastructure (hosting, funding, or sponsors) was being obscured or utilized to maintain operational continuity in a way that suggests concealment of the campaign's existence.",
+    "sources": []
+  },
+  {
+    "external_id": "T0131",
+    "findings": "No evidence was found that the article was specifically hosted in a jurisdiction to exploit TOS or that it was intentionally placed on the threshold of policy violations to avoid takedown. The content is highly inflammatory and uses stereotypical language, but there is no evidence of strategic technical placement to bypass moderation.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 23.63 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0059', 'T0060', 'T0128', 'T0129', 'T0130', 'T0131']
+[RESPONSE] {
+"Techniques": ["T0060"]
+}
+
+[INFO] Done in 1.06 seconds
+[INFO] Identified Techniques: ['T0060']
+[INFO] Testing for tactic: assess-effectiveness
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0132', 'T0133', 'T0134']
+[RESPONSE] {
+"Techniques": []
+}
+
+[INFO] Done in 0.55 seconds
+[INFO] Identified Techniques: []
+[INFO] Testing for tactic: target-audience-analysis
+[INFO] Techniques requiring OSINT evidence: ['T0072', 'T0080', 'T0081']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['refugees deported from Norway Murmansk nightclub incident', 'refugees Murmansk nightclub assault 33 arrested', "Murmansk nightclub refugee incident Cologne New Year's Eve comparison"]
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0072",
+    "findings": "The article uses highly divisive and polarizing language ('wimpy court', 'obtuse political correctness', 'bullied into submission', 'hold an entire continent hostage') designed to trigger emotional responses from specific audience segments, particularly those with anti-immigration or nationalist viewpoints. However, no direct evidence was found in the text or search results to confirm specific targeting of a digital audience segment through metadata or advertising, though the rhetoric is characteristic of such segmentation.",
+    "sources": []
+  },
+  {
+    "external_id": "T0080",
+    "findings": "No evidence was found in the article or search results indicating that the author performed mapping of the target audience's information environment (e.g., social media analytics or web traffic analysis) to determine the most effective way to reach them.",
+    "sources": []
+  },
+  {
+    "external_id": "T0081",
+    "findings": "The article explicitly exploits existing social and political vulnerabilities and 'wedge issues.' It leverages 'perceived adversaries' (European leaders/institutions) and 'societal fissures' (the refugee crisis and cultural assimilation) to advance its narrative. It compares a specific (potentially fabricated or unverified) incident in Murmansk to the well-known Cologne New Year's Eve assaults to exploit existing prejudices and conspiracy narratives regarding migrant crime.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 21.05 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0072', 'T0080', 'T0081']
+[RESPONSE] {
+"Techniques": ["T0081"]
+}
+
+[INFO] Done in 1.04 seconds
+[INFO] Identified Techniques: ['T0081']
+[INFO] Testing for tactic: develop-narratives
+[INFO] Techniques requiring OSINT evidence: ['T0068']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['refugees deported from Norway Murmansk nightclub incident', 'refugees Murmansk nightclub groping 33 arrested', 'Murmansk nightclub incident refugees Cologne comparison']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0068",
+    "findings": "The article appears to be a rehash of a story from February 2016 (published by Russia Insider) rather than a response to a current breaking news event or active crisis. While the article uses inflammatory language comparing the incident to the Cologne New Year's Eve assaults (which was a significant event in 2015-2016), the search results confirm the source of the specific claim regarding the Murmansk nightclub incident dates back to 2016. Therefore, it does not currently meet the criteria of responding to a *new* breaking news event or an *active* crisis in a way that exploits the immediate uncertainty of a developing situation, but rather utilizes historical grievances and past events to construct its narrative.",
+    "sources": [
+      "https://russia-insider.com/en/politics/refugees-harass-women-russian-nightclub-are-promptly-beaten-and-sent-prison/ri12684"
+    ]
+  }
+]
+[INFO] Evidence gathering done in 14.33 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0003', 'T0004', 'T0022', 'T0040', 'T0068', 'T0082', 'T0083']
+[RESPONSE] {
+"Techniques": ["T0003", "T0083"]
+}
+
+[INFO] Done in 1.39 seconds
+[INFO] Identified Techniques: ['T0003', 'T0083']
+[INFO] Testing for tactic: establish-assets
+[INFO] Techniques requiring OSINT evidence: ['T0010', 'T0014', 'T0065', 'T0091', 'T0094', 'T0095', 'T0096', 'T0113']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees deported from Norway groping women', 'Murmansk refugees 33 arrested beating 18 hospital', 'Murmansk nightclub incident refugees Russia Cologne comparison', "source of article 'Europe Take Note: ‘Refugees’ Molest Russian Women'"]
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0010",
+    "findings": "The article's claims regarding a specific incident in Murmansk involving 50 refugees being beaten by locals after groping women at a nightclub could not be verified through search results. While search results discuss general refugee tensions in the Murmansk/Norway border region and other unrelated sexual assault cases in Europe, no news reports or official records match the specific details of the 'Murmansk nightclub' incident described (33 arrested, 18 hospitalized). This lack of corroboration for such a specific, large-scale event might suggest the narrative is fabricated or highly distorted. However, without finding the original source of the text, it is not possible to definitively link it to a specific state-sponsored disinformation campaign or 'cultivated agent' via the provided text alone.",
+    "sources": []
+  },
+  {
+    "external_id": "T0014",
+    "findings": "No evidence was found in the article or search results indicating that the text is part of a fundraising campaign or uses crowdfunding platforms like Patreon or GoFundMe.",
+    "sources": []
+  },
+  {
+    "external_id": "T0065",
+    "findings": "No evidence was found indicating the creation or co-opting of physical broadcast capabilities (TV/radio) by the author of this text.",
+    "sources": []
+  },
+  {
+    "external_id": "T0091",
+    "findings": "No evidence was found regarding the recruitment of trolls, partisans, or contractors to amplify this specific message.",
+    "sources": []
+  },
+  {
+    "external_id": "T0094",
+    "findings": "No evidence was found that the author of the article deceptively inserted assets into existing networks to influence them.",
+    "sources": []
+  },
+  {
+    "external_id": "T0095",
+    "findings": "The article appears to be a standalone piece of content. Without identifying the specific website or platform hosting this text, it cannot be confirmed if it is an 'owned media asset' part of a larger influence operation infrastructure.",
+    "sources": []
+  },
+  {
+    "external_id": "T0096",
+    "findings": "No evidence was found that this content was produced by a large-scale content farm.",
+    "sources": []
+  },
+  {
+    "external_id": "T0113",
+    "findings": "No evidence was found indicating the use of commercial analytic firms to tailor this content or detect audience trends.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 32.91 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0010', 'T0014', 'T0065', 'T0091', 'T0092', 'T0093', 'T0094', 'T0095', 'T0096', 'T0113', 'T0145', 'T0146', 'T0147', 'T0148', 'T0149', 'T0150']
+[RESPONSE] {
+"Techniques": []
+}
+
+[INFO] Done in 0.99 seconds
+[INFO] Identified Techniques: []
+[INFO] Testing for tactic: establish-legitimacy
+[INFO] Techniques requiring OSINT evidence: ['T0098']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ["origin of article 'Europe Take Note: ‘Refugees’ Molest Russian Women, Get Throttled by Russian Men'", "source of 'Refugees Molest Russian Women, Get Throttled by Russian Men' Murmansk nightclub", "who owns the website containing 'Europe Take Note: ‘Refugees’ Molest Russian Women'", 'Murmansk nightclub refugee assault 33 arrested news']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0098",
+    "findings": "The search results did not provide information regarding the specific website or publisher of the article 'Europe Take Note: \u2018Refugees\u2019 Molest Russian Women...'. While search results mention other news outlets (Remix News, RT, The Barents Observer, The Independent, National Interest) and their reporting on related topics (migrant crime in Europe), they do not identify the ownership, reporting history, or advertising details of the platform where the target article originated. Consequently, it is not possible to determine if the site is an inauthentic news site through the current evidence.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 14.18 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0097', 'T0098', 'T0100', 'T0143', 'T0144']
+[RESPONSE] {
+"Techniques": []
+}
+
+[INFO] Done in 0.83 seconds
+[INFO] Identified Techniques: []
+[INFO] Testing for tactic: maximise-exposure
+[INFO] Techniques requiring OSINT evidence: ['T0039', 'T0119', 'T0121', 'T0122']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees groping incident 33 arrested', 'refugees deported from Norway Murmansk nightclub', 'Murmansk incident refugees Cologne New Years Eve comparison', 'refugees Murmansk nightclub beating news reports']
+[SEARCH]   5 results from Diffbot
+[RESPONSE] [
+  {
+    "external_id": "T0039",
+    "findings": "No evidence was found in the provided text or search results to suggest that the article was part of a 'Bait Influencer' campaign. There is no mention of specific influencers being targeted or used to amplify this content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0119",
+    "findings": "No evidence was found to confirm that this specific article was cross-posted across multiple platforms or communities as part of an influence operation. While the article mentions social media trends, it does not provide data on its own distribution patterns.",
+    "sources": []
+  },
+  {
+    "external_id": "T0121",
+    "findings": "No evidence was found to suggest that the content or its distribution was designed to manipulate platform algorithms (e.g., through bot amplification or circumvention of security measures).",
+    "sources": []
+  },
+  {
+    "external_id": "T0122",
+    "findings": "No evidence was found in the article that it explicitly directs users to alternative platforms to bypass potential censorship or suspension.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 19.46 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0039', 'T0049', 'T0118', 'T0119', 'T0120', 'T0121', 'T0122']
+[RESPONSE] {
+"Techniques": ["T0118"]
+}
+
+[INFO] Done in 1.05 seconds
+[INFO] Identified Techniques: ['T0118']
+[INFO] Testing for tactic: drive-online-harms
+[INFO] Techniques requiring OSINT evidence: ['T0047', 'T0048', 'T0123', 'T0124', 'T0125']
+[INFO] Gathering evidence for techniques requiring external knowledge...
+[SEARCH] Search round 1/4: ['Murmansk nightclub refugees assault 33 arrested', 'refugees deported from Norway Murmansk nightclub groping', 'Russian men beat refugees Murmansk nightclub']
+[SEARCH]   5 results from Diffbot
+127.0.0.1 - - [16/Sep/2026 16:14:58] "GET /api/cache?page=1&page_size=20&sort=recent HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:15:03] "GET /api/cache/entry?article_id=2f6f26c2-1673-4faa-a402-5cfbc6c50d84 HTTP/1.1" 200 -
+[RESPONSE] [
+  {
+    "external_id": "T0047",
+    "findings": "No evidence was found in the provided search results to support the claim that social media was censored as a political force in relation to the specific Murmansk nightclub incident described in the article. The search results discussed unrelated events (Moscow concert hall attack, LGBTQIA+ crackdowns in Orenburg, and Syrian refugees on the Norway-Russia border), but did not mention government-driven content takedowns for the Murmansk event.",
+    "sources": []
+  },
+  {
+    "external_id": "T0048",
+    "findings": "No evidence was found to support the claim that the article's authors or associated actors engaged in the harassment, intimidation, or doxing of individuals to discourage dissent. The article itself contains strong language, but search results did not provide information regarding orchestrated harassment campaigns linked to this specific narrative.",
+    "sources": []
+  },
+  {
+    "external_id": "T0123",
+    "findings": "No evidence was found in the search results indicating that offensive cyberspace operations (such as the use of cyber tools to alter content trajectory or block opposition) were used in connection with the claims made in the article.",
+    "sources": []
+  },
+  {
+    "external_id": "T0124",
+    "findings": "No evidence was found to support the claim that the operators of this narrative exploited platform moderation tools or manipulated legal frameworks to suppress opposition or remove non-violative content.",
+    "sources": []
+  },
+  {
+    "external_id": "T0125",
+    "findings": "The search results did not provide evidence of platform filtering (decontextualization of claims across platforms) specifically related to the Murmansk nightclub incident described in the article. While the article makes specific claims about 'refugees' being beaten in Murmansk, the search results did not show how this information was handled or decontextualized across different digital platforms.",
+    "sources": []
+  }
+]
+[INFO] Evidence gathering done in 25.29 seconds
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0047', 'T0048', 'T0123', 'T0124', 'T0125']
+[RESPONSE] {
+"Techniques": []
+}
+
+[INFO] Done in 0.74 seconds
+[INFO] Identified Techniques: []
+[INFO] Total Identified Techniques: ['T0002', 'T0066', 'T0076', 'T0079', 'T0139', 'T0016', 'T0023', 'T0084', 'T0085', 'T0152', 'T0153', 'T0042', 'T0115', 'T0127', 'T0060', 'T0081', 'T0003', 'T0083', 'T0118']
+[INFO] Total execution time: 345.34 seconds
+[INFO] Testing sub-techniques of: T0139
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0139d001', 'T0139d002', 'T0139d003']
+[RESPONSE] {
+"Techniques": ["T0139d003"]
+}
+
+[INFO] Done in 1.18 seconds
+[INFO] Identified Sub-Techniques of T0139: ['T0139.003']
+[INFO] Testing sub-techniques of: T0023
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0023d001', 'T0023d002']
+[RESPONSE] {
+"Techniques": ["T0023d001"]
+}
+
+[INFO] Done in 1.09 seconds
+[INFO] Identified Sub-Techniques of T0023: ['T0023.001']
+[INFO] Testing sub-techniques of: T0084
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0084d001', 'T0084d002', 'T0084d003', 'T0084d004']
+[RESPONSE] {
+"Techniques": ["T0084d001"]
+}
+
+[INFO] Done in 1.12 seconds
+[INFO] Identified Sub-Techniques of T0084: ['T0084.001']
+[INFO] Testing sub-techniques of: T0085
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0085d001', 'T0085d003', 'T0085d004', 'T0085d005', 'T0085d006', 'T0085d007', 'T0085d008']
+[RESPONSE] {
+"Techniques": ["T0085d003"]
+}
+
+[INFO] Done in 1.18 seconds
+[INFO] Identified Sub-Techniques of T0085: ['T0085.003']
+[INFO] Testing sub-techniques of: T0152
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0152d001', 'T0152d002', 'T0152d003', 'T0152d004', 'T0152d005', 'T0152d006', 'T0152d007', 'T0152d008', 'T0152d009', 'T0152d010', 'T0152d011', 'T0152d012']
+[RESPONSE] {
+"Techniques": ["T0152d004"]
+}
+
+[INFO] Done in 1.32 seconds
+[INFO] Identified Sub-Techniques of T0152: ['T0152.004']
+[INFO] Testing sub-techniques of: T0153
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0153d001', 'T0153d002', 'T0153d003', 'T0153d004', 'T0153d005', 'T0153d006', 'T0153d007']
+[RESPONSE] {"Techniques": ["T0153d006"]}
+
+[INFO] Done in 1.11 seconds
+[INFO] Identified Sub-Techniques of T0153: ['T0153.006']
+[INFO] Testing sub-techniques of: T0115
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0115d001', 'T0115d002', 'T0115d003']
+[RESPONSE] {
+"Techniques": ["T0115d003"]
+}
+
+[INFO] Done in 1.1 seconds
+[INFO] Identified Sub-Techniques of T0115: ['T0115.003']
+[INFO] Testing sub-techniques of: T0127
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0127d001', 'T0127d002']
+[RESPONSE] {
+"Techniques": ["T0127d002"]
+}
+
+[INFO] Done in 1.08 seconds
+[INFO] Identified Sub-Techniques of T0127: ['T0127.002']
+[INFO] Testing sub-techniques of: T0081
+[INFO] google/gemma-4-26B-A4B-it thinking...
+[INFO] Available Classes: ['T0081d001', 'T0081d002', 'T0081d003', 'T0081d004', 'T0081d005', 'T0081d006', 'T0081d007', 'T0081d008']
+[RESPONSE] {
+  "Techniques": ["T0081d003", "T0081d004", "T0081d006"]
+}
+
+[INFO] Done in 2.23 seconds
+[INFO] Identified Sub-Techniques of T0081: ['T0081.003', 'T0081.004', 'T0081.006']
+[INFO] Total Identified Techniques: ['T0002', 'T0066', 'T0076', 'T0079', 'T0139.003', 'T0016', 'T0023.001', 'T0084.001', 'T0085.003', 'T0152.004', 'T0153.006', 'T0042', 'T0115.003', 'T0127.002', 'T0060', 'T0081.003', 'T0081.004', 'T0081.006', 'T0003', 'T0083', 'T0118']
+[INFO] Total execution time: 356.76 seconds
+2026-09-16 16:15:15.773 | DEBUG    | label_dataset:run_labelling:317 - Successfully labelled 2f886613-e8cf-4583-8006-b67fe738648f with techniques - ['T0002', 'T0066', 'T0076', 'T0079', 'T0139.003', 'T0016', 'T0023.001', 'T0084.001', 'T0085.003', 'T0152.004', 'T0153.006', 'T0042', 'T0115.003', 'T0127.002', 'T0060', 'T0081.003', 'T0081.004', 'T0081.006', 'T0003', 'T0083', 'T0118']
+100%|██████████| 1/1 [05:56<00:00, 356.76s/it]100%|██████████| 1/1 [05:56<00:00, 356.76s/it]
+127.0.0.1 - - [16/Sep/2026 16:15:15] "GET /api/cache?page=1&page_size=20&sort=recent HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:15:30] "GET /api/cache/entry?article_id=2f6f26c2-1673-4faa-a402-5cfbc6c50d84 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Sep/2026 16:15:39] "GET /api/cache/entry?article_id=2f886613-e8cf-4583-8006-b67fe738648f HTTP/1.1" 200 -

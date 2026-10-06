@@ -114,6 +114,12 @@
           <span>Articles to label this run (blank = all remaining)</span>
           <input type="number" id="limit" min="1" placeholder="e.g. 10">
         </label>
+        <label class="field">
+          <span>Language</span>
+          <select id="datasetLanguage">
+            <option value="">All languages</option>
+          </select>
+        </label>
         <label class="check">
           <input type="checkbox" id="export" checked>
           <span>Export on completion
@@ -163,6 +169,7 @@
       <button data-tab="evidence">Evidence <span class="badge" id="badgeEv">0</span></button>
       <button data-tab="searches">Searches <span class="badge" id="badgeSearch">0</span></button>
       <button data-tab="articles">Articles <span class="badge" id="badgeArt">0</span></button>
+      <button data-tab="database">Database <span class="badge" id="badgeDb">0</span></button>
       <button data-tab="framework">Framework</button>
       <button data-tab="logs">Logs</button>
     </div>
@@ -193,6 +200,50 @@
         <div class="summary-grid" id="articleStats"></div>
         <div id="articles"></div>
         <div class="empty" id="artEmpty">No articles processed yet.</div>
+      </div>
+
+      <div class="panel" data-panel="database">
+        <div class="db-head">
+          <div>
+            <h3>Labelled dataset cache</h3>
+            <p class="hint" id="dbPath"></p>
+          </div>
+          <button id="dbRefresh">Refresh</button>
+        </div>
+
+        <div class="summary-grid" id="dbStats"></div>
+        <div id="dbMeter"></div>
+
+        <figure class="viz" id="dbChart" hidden>
+          <figcaption>
+            <h4>Techniques by how often they were identified</h4>
+            <p class="hint" id="dbChartSub"></p>
+          </figcaption>
+          <div class="viz-rows" id="dbChartRows" role="table" aria-label="Technique frequency"></div>
+          <button class="linkish" id="dbChartToggle" hidden></button>
+        </figure>
+
+        <div class="fw-controls db-filters">
+          <input type="text" id="dbSearch" placeholder="Search title, keywords, publisher, URL or article text…">
+          <select id="dbTechnique"><option value="">All techniques</option></select>
+          <select id="dbLanguage"><option value="">All languages</option></select>
+          <select id="dbPublisher"><option value="">All publishers</option></select>
+          <select id="dbLabel">
+            <option value="">Both classes</option>
+            <option value="1">Disinformation</option>
+            <option value="0">Trustworthy</option>
+          </select>
+          <select id="dbSort">
+            <option value="recent">Newest labelled first</option>
+            <option value="oldest">Oldest labelled first</option>
+            <option value="techniques">Most techniques first</option>
+          </select>
+        </div>
+
+        <div id="dbActiveFilter"></div>
+        <div id="dbEntries"></div>
+        <div class="pager" id="dbPager"></div>
+        <div class="empty" id="dbEmpty">The cache is empty. Label some articles from the Dataset tab first.</div>
       </div>
 
       <div class="panel" data-panel="framework">

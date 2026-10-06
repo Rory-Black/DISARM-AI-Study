@@ -48,6 +48,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from agent_events import Cancelled, EventBus, truncate
 from DISARM_LLM_Interface import DISARM_LLM, Log, Mode
 from catalog import load_framework
+import cache_store
 
 sys.path.insert(0, str(SCRIPTS_DIR / "collect"))
 import label_dataset
@@ -239,7 +240,7 @@ def article_run(articles, config):
     return target
 
 
-def dataset_run(config, limit, export, cache_path, subset_path):
+def dataset_run(config, limit, language, export, cache_path, subset_path):
     """Runs the dataset labelling script over the balanced euvsdisinfo subset."""
 
     def target(emit, should_stop):
@@ -253,6 +254,7 @@ def dataset_run(config, limit, export, cache_path, subset_path):
             max_search_rounds=config["max_search_rounds"],
             results_per_query=config["results_per_query"],
             limit=limit,
+            language=language,
             subset_path=subset_path,
             cache_path=cache_path,
             export=export,
@@ -296,49 +298,148 @@ def api_status():
     return jsonify(manager.status())
 
 
-@app.get("/api/dataset/summary")
-def api_dataset_summary():
-    """How far through the dataset the cache already is, so a run can be resumed knowingly."""
-    cache_path = request.args.get("cache_path", label_dataset.CACHE_PATH)
-    subset_path = request.args.get("subset_path", label_dataset.SUBSET_PATH)
+_subset_counts = {}
 
-    summary = {
-        "cache_path": cache_path,
-        "subset_path": subset_path,
-        "subset_exists": os.path.exists(subset_path),
-        "labelled": 0,
-        "total": None,
-        "technique_counts": {},
-    }
 
-    if os.path.exists(cache_path):
-        counts = {}
-        labelled = 0
-        with open(cache_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                labelled += 1
-                for technique in entry.get("disarm_techniques") or []:
-                    counts[technique] = counts.get(technique, 0) + 1
-        summary["labelled"] = labelled
-        summary["technique_counts"] = dict(sorted(counts.items(), key=lambda kv: -kv[1]))
-
-    if summary["subset_exists"]:
-        # count rows without loading a 50MB frame into memory
+def subset_size(subset_path):
+    """Rows in the balanced subset, counted once per file and remembered."""
+    if not os.path.exists(subset_path):
+        return None
+    key = (subset_path, os.path.getmtime(subset_path))
+    if key not in _subset_counts:
         try:
             import pandas as pd
 
-            summary["total"] = int(sum(len(chunk) for chunk in pd.read_csv(subset_path, usecols=["article_id"], chunksize=20000)))
-        except Exception as e:
-            summary["total_error"] = str(e)
+            # count rows without loading a 50MB frame into memory
+            _subset_counts[key] = int(
+                sum(len(chunk) for chunk in pd.read_csv(subset_path, usecols=["article_id"], chunksize=20000))
+            )
+        except Exception:
+            _subset_counts[key] = None
+    return _subset_counts[key]
 
-    return jsonify(summary)
+
+_subset_language_counts = {}
+
+
+def subset_language_counts(subset_path):
+    """Articles per language in the subset, counted once per file and remembered."""
+    if not os.path.exists(subset_path):
+        return {}
+    key = (subset_path, os.path.getmtime(subset_path))
+    if key not in _subset_language_counts:
+        try:
+            _subset_language_counts[key] = label_dataset.subset_languages(subset_path)
+        except Exception:
+            _subset_language_counts[key] = {}
+    return _subset_language_counts[key]
+
+
+@app.get("/api/dataset/summary")
+def api_dataset_summary():
+    """How far through the dataset the cache already is, so a run can be resumed knowingly.
+
+    The per-language breakdown feeds the language filter: for each language the subset
+    holds, how many are already labelled and how many a run would still have to do.
+    """
+    cache_path = request.args.get("cache_path", label_dataset.CACHE_PATH)
+    subset_path = request.args.get("subset_path", label_dataset.SUBSET_PATH)
+    entries = cache_store.load(cache_path)
+
+    labelled_by_language = {}
+    for entry in entries:
+        name = entry.get("article_language") or entry.get("language")
+        if name:
+            labelled_by_language[name] = labelled_by_language.get(name, 0) + 1
+
+    languages = [
+        {
+            "language": name,
+            "total": total,
+            "labelled": labelled_by_language.get(name, 0),
+            "remaining": max(0, total - labelled_by_language.get(name, 0)),
+        }
+        for name, total in subset_language_counts(subset_path).items()
+    ]
+
+    return jsonify(
+        {
+            "cache_path": cache_path,
+            "subset_path": subset_path,
+            "subset_exists": os.path.exists(subset_path),
+            "labelled": len(entries),
+            "total": subset_size(subset_path),
+            "languages": languages,
+        }
+    )
+
+
+@app.get("/api/cache")
+def api_cache():
+    """The labelled cache: headline stats, facets and a page of matching rows.
+
+    Article bodies are left out of the list - `/api/cache/entry` serves one on demand,
+    so opening the tab never ships tens of MB of text to the browser.
+    """
+    cache_path = request.args.get("cache_path", label_dataset.CACHE_PATH)
+    subset_path = request.args.get("subset_path", label_dataset.SUBSET_PATH)
+    page = max(1, int(request.args.get("page", 1)))
+    page_size = min(100, max(1, int(request.args.get("page_size", 20))))
+    sort = request.args.get("sort", "recent")
+
+    entries = cache_store.load(cache_path)
+    matching = [
+        e
+        for e in entries
+        if cache_store.matches(
+            e,
+            query=request.args.get("q", "").strip(),
+            technique=request.args.get("technique", "").strip(),
+            language=request.args.get("language", "").strip(),
+            publisher=request.args.get("publisher", "").strip(),
+            label=request.args.get("label", "").strip(),
+        )
+    ]
+
+    if sort == "techniques":
+        matching = sorted(matching, key=lambda e: -len(e.get("disarm_techniques") or []))
+    elif sort == "oldest":
+        matching = list(matching)
+    else:  # most recently labelled first - the cache is append-ordered
+        matching = list(reversed(matching))
+
+    start = (page - 1) * page_size
+    page_entries = matching[start : start + page_size]
+
+    return jsonify(
+        {
+            "cache_path": cache_path,
+            "exists": os.path.exists(cache_path),
+            "total": len(entries),
+            "filtered": len(matching),
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, -(-len(matching) // page_size)),
+            "entries": [cache_store.light(e) for e in page_entries],
+            "facets": cache_store.facets(entries),
+            "stats": cache_store.stats(entries, subset_total=subset_size(subset_path)),
+        }
+    )
+
+
+@app.get("/api/cache/entry")
+def api_cache_entry():
+    """One labelled row in full, including the article body."""
+    cache_path = request.args.get("cache_path", label_dataset.CACHE_PATH)
+    article_id = request.args.get("article_id", "")
+    entry = cache_store.find(cache_store.load(cache_path), article_id)
+    if entry is None:
+        return jsonify({"error": f"No cached article with id {article_id}"}), 404
+
+    full = dict(entry)
+    full["text"] = cache_store.body(entry)
+    full.pop("article_text", None)
+    return jsonify(full)
 
 
 @app.post("/api/run/articles")
@@ -370,13 +471,19 @@ def api_run_dataset():
         config = parse_config(payload.get("config", {}))
         limit = payload.get("limit")
         limit = int(limit) if limit else None
+        language = (payload.get("language") or "").strip() or None
         cache_path = payload.get("cache_path") or label_dataset.CACHE_PATH
         subset_path = payload.get("subset_path") or label_dataset.SUBSET_PATH
+
+        if language and language not in subset_language_counts(subset_path):
+            raise ValueError(f"No articles in the subset have language '{language}'")
+
         manager.start(
             "dataset",
             config,
-            dataset_run(config, limit, bool(payload.get("export", True)), cache_path, subset_path),
+            dataset_run(config, limit, language, bool(payload.get("export", True)), cache_path, subset_path),
             limit=limit,
+            language=language,
             cache_path=cache_path,
             subset_path=subset_path,
         )

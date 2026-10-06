@@ -1,7 +1,9 @@
 import os
 import sys
 import json
+import time
 import contextlib
+from datetime import datetime, timezone
 
 import pandas as pd
 import matplotlib
@@ -121,6 +123,56 @@ def load_cache(path=CACHE_PATH):
     return cache
 
 
+class _ArticleRecorder:
+    """Captures the evidence and searches behind one article's labels.
+
+    The classifier reports these as events rather than returning them, so without
+    this they would only ever exist in a log. Recording them makes the cache
+    self-describing: each row says not just which techniques were identified but what
+    the agent looked up to decide, and which sources it saw.
+    """
+
+    def __init__(self, downstream=None):
+        self.downstream = downstream
+        self.evidence = []
+        self.queries = []
+
+    def __call__(self, event_type, **payload):
+        if event_type == "evidence_reported":
+            for item in payload.get("evidence") or []:
+                self.evidence.append(
+                    {
+                        "external_id": item.get("external_id"),
+                        "findings": item.get("findings", ""),
+                        "sources": item.get("sources") or [],
+                    }
+                )
+        elif event_type == "search_round":
+            self.queries.extend(payload.get("queries") or [])
+
+        if self.downstream is not None:
+            self.downstream(event_type, **payload)
+
+
+def row_language(row):
+    """The article's language. `article_language` is the dataset's own column; the
+    balanced subset copies it to `language`, so fall back to that."""
+    for field in ("article_language", "language"):
+        value = row.get(field) if hasattr(row, "get") else getattr(row, field, None)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def subset_languages(subset_path=SUBSET_PATH):
+    """Article counts per language in the balanced subset, largest first."""
+    if not os.path.exists(subset_path):
+        return {}
+    column = "article_language"
+    counts = pd.read_csv(subset_path, usecols=[column])[column].value_counts()
+    return {str(name): int(count) for name, count in counts.items()}
+
+
 def _json_safe(value):
     """pandas/numpy scalars aren't JSON serialisable on their own - fall back to str."""
     if hasattr(value, "item"):
@@ -180,6 +232,7 @@ def run_labelling(
     max_search_rounds=4,
     results_per_query=5,
     limit=None,
+    language=None,
     subset_path=SUBSET_PATH,
     cache_path=CACHE_PATH,
     export=True,
@@ -190,9 +243,11 @@ def run_labelling(
     """Labels articles from the balanced subset with DISARM techniques.
 
     Every article already present in the cache is skipped, so a run can be stopped and
-    resumed. `on_event(event_type, **payload)` receives per-article progress on top of
-    the per-step events the classifier itself emits, and `should_stop()` is polled
-    between articles so a caller can cancel cleanly without losing completed work.
+    resumed. `language` restricts the run to one of the dataset's article languages
+    (matched against `article_language`); `limit` then caps that filtered queue.
+    `on_event(event_type, **payload)` receives per-article progress on top of the
+    per-step events the classifier itself emits, and `should_stop()` is polled between
+    articles so a caller can cancel cleanly without losing completed work.
     """
 
     def emit(event_type, **payload):
@@ -211,6 +266,9 @@ def run_labelling(
     done_ids = {c.get("article_id") for c in cache}
 
     pending = [(i, row) for i, row in df.iterrows() if row.article_id not in done_ids]
+    if language:
+        pending = [(i, row) for i, row in pending if row_language(row) == language]
+    # the limit caps whatever is left after the language filter, not before it
     if limit:
         pending = pending[: int(limit)]
 
@@ -222,6 +280,7 @@ def run_labelling(
         subset_path=subset_path,
         cache_path=cache_path,
         architecture=architecture,
+        language=language,
     )
 
     skipped = len(done_ids)
@@ -247,6 +306,8 @@ def run_labelling(
             preview=truncate(row.text, 500),
         )
 
+        recorder = _ArticleRecorder(on_event)
+        started = time.time()
         llm = DISARM_LLM(
             article_content=row.text,
             model_name=model_name,
@@ -257,7 +318,7 @@ def run_labelling(
             web_search=web_search,
             max_search_rounds=max_search_rounds,
             results_per_query=results_per_query,
-            on_event=on_event,
+            on_event=recorder,
             should_stop=should_stop,
         )
 
@@ -266,7 +327,7 @@ def run_labelling(
         stdout_guard = open(os.devnull, "w") if quiet else None
         try:
             with contextlib.redirect_stdout(stdout_guard) if quiet else contextlib.nullcontext():
-                _, techniques = ARCHITECTURES[architecture](llm)
+                tactics, techniques = ARCHITECTURES[architecture](llm)
         except Cancelled:
             emit("dataset_stopped", completed=completed, failed=failures)
             break
@@ -283,6 +344,18 @@ def run_labelling(
 
         data = {k: v for k, v in dict(row).items()}
         data["disarm_techniques"] = techniques
+        data["disarm_tactics"] = list(tactics) if tactics else []
+        data["disarm_evidence"] = recorder.evidence
+        data["disarm_meta"] = {
+            "model": model_name,
+            "mode": mode.name,
+            "architecture": architecture,
+            "check_sub_techniques": check_sub_techniques,
+            "web_search": web_search,
+            "search_queries": recorder.queries,
+            "labelled_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "duration_s": round(time.time() - started, 2),
+        }
         with open(cache_path, "a") as f:
             f.write(json.dumps(data, default=_json_safe) + "\n")
 

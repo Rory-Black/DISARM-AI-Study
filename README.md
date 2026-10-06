@@ -32,7 +32,8 @@ local vs hosted, sub-technique checking, and the web-search budget.
 
 **Give it articles** three ways: paste text, drop in `.txt`/`.md`/`.json` files (each
 file is one article; a JSON array is a list of articles), or run the dataset labeller
-over the balanced euvsdisinfo subset.
+over the balanced euvsdisinfo subset — optionally restricted to one `article_language`,
+with each language showing how many of its articles are still unlabelled.
 
 **Watch it work** — the header shows the task in progress and progress through the
 tactics; the tabs break the run down into:
@@ -44,8 +45,24 @@ tactics; the tabs break the run down into:
 | Evidence | The research agent's findings per technique, with the source URLs it actually saw |
 | Searches | Every web search round: the queries issued and the results returned |
 | Articles | Per-article status, timings and results; expand a row for the same technique view as above, scoped to that one article |
+| Database | The labelled cache itself — see below |
 | Framework | Searchable browser of all 16 tactics and 391 techniques from `.data/DISARM.json` |
 | Logs | The raw engine log, as the terminal would show it |
+
+**Browse what was labelled** on the Database tab, which reads
+`.data/euvsdisinfo_cache.json` directly and works whether or not a run is in progress:
+headline counts and subset coverage, the disinformation share, and a ranked chart of
+which DISARM techniques were identified most often (select a bar to filter). Below
+that, every labelled article — filterable by technique, language, publisher and class,
+and searchable across titles, keywords, URLs and article text. Expanding a row shows
+the article's metadata and full text, each identified technique with its DISARM name
+and description, the evidence the agent gathered (including evidence for techniques it
+then decided *not* to label), and the provenance of the label: model, mode,
+architecture and every web search it ran.
+
+Evidence and provenance are recorded into the cache as articles are labelled. Rows
+labelled before this existed still show their techniques, and say plainly that no
+evidence was stored for them.
 
 The page can be opened or reloaded mid-run — the server replays the run so far. **Stop
 run** cancels between steps; for dataset labelling, everything already written to the
