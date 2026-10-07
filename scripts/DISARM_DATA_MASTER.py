@@ -20,32 +20,49 @@ def get_mitre_external_id(obj):
 def is_sub_tech(external_id):
     return '.' in external_id
 
+# the requirements workbook is static for a run, but the lookups below are called once per
+# technique - several hundred times over a batch classification - so it is read from disk once
+# and kept in memory as {external_id: {"requirements": [...], "extended_desc": ...}}
+_requirements_records = None
+
+def _load_requirements():
+    global _requirements_records
+    if _requirements_records is None:
+        wb = load_workbook(ADD_REQUIREMENTS_FILE, read_only=True, data_only=True)
+        ws = wb.active
+        records = {}
+        for row in ws.iter_rows(min_row=2, max_col=6, values_only=True):
+            external_id, col_e, col_f = row[0], row[4], row[5]
+            if external_id is None:
+                continue
+            records[external_id] = {
+                "requirements": json.loads(col_e) if col_e is not None else [],
+                "extended_desc": col_f,
+            }
+        wb.close()
+        _requirements_records = records
+    return _requirements_records
+
 def get_parent_extended_desc(external_id):
-    wb = load_workbook(ADD_REQUIREMENTS_FILE)
-    ws = wb.active
-    for row in range(2, ws.max_row + 1):
-        col_a = ws[f"A{row}"].value
-        col_f = ws[f"F{row}"].value
-        if col_a == external_id:
-            return col_f if col_f is not None else ""
-    print(f"Warning: No record found for {external_id} in {ADD_REQUIREMENTS_FILE}")
-    return None
+    record = _load_requirements().get(external_id)
+    if record is None:
+        print(f"Warning: No record found for {external_id} in {ADD_REQUIREMENTS_FILE}")
+        return None
+    extended_desc = record["extended_desc"]
+    return extended_desc if extended_desc is not None else ""
 
 def get_additional_llm_requirements(external_ids: list):
-    wb = load_workbook(ADD_REQUIREMENTS_FILE)
-    ws = wb.active
+    records = _load_requirements()
 
     requirements = []
-    for row in range(2, ws.max_row + 1):
-        col_a = ws[f"A{row}"].value
-        col_e = ws[f"E{row}"].value
-        if col_a in external_ids:
-            if col_e is not None:
-                rqs =  json.loads(col_e)
-                # add to requiremts list if not already in requirements list
-                for rq in rqs:
-                    if rq not in requirements:
-                        requirements.append(rq)
+    for external_id in external_ids:
+        record = records.get(external_id)
+        if record is None:
+            continue
+        # add to requiremts list if not already in requirements list
+        for rq in record["requirements"]:
+            if rq not in requirements:
+                requirements.append(rq)
 
     return requirements
 

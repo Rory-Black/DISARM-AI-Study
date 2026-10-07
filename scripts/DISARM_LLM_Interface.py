@@ -397,8 +397,11 @@ The assistant is investigating, not deciding. Do NOT classify whether the techni
 The user input will be in the following format:
 {
     "Article": "article text",
+    "KnownFindings": [{"external_id": "external_id", "findings": "...", "sources": ["url1"]}],
     "Techniques": [{"external_id": "external_id", "description": "technique description"}]
 }
+
+"KnownFindings" is optional. When present it holds evidence that has ALREADY been gathered about this same article for other techniques. Treat those findings as established fact: reuse them freely, and do NOT search again to re-confirm anything they already settle. Only search for what they leave open. The assistant still reports one evidence object per technique in "Techniques" - findings carried over from "KnownFindings" should be restated there, with their sources.
 """
 
 EVIDENCE_SYS_OUTPUT = """
@@ -490,6 +493,7 @@ class DISARM_LLM:
                  web_search=True,
                  max_search_rounds=4,
                  results_per_query=5,
+                 evidence_batch_size=30,
                  on_event=None,
                  should_stop=None
                  ):
@@ -508,6 +512,12 @@ class DISARM_LLM:
         self.debug_log = debug_log
         self.max_search_rounds = max_search_rounds
         self.results_per_query = results_per_query
+        self.evidence_batch_size = evidence_batch_size
+
+        # per-article evidence caches - see evidence_cache()
+        self._evidence_cache = {}
+        self._search_cache = {}
+        self._evidence_article = None
 
         # evidence gathering needs web access: local models search via Diffbot,
         # hosted models via the provider's own web_search tool
@@ -760,55 +770,138 @@ class DISARM_LLM:
         self._emit("tactics_identified", tactics=ta_result_list)
         return ta_result_list
 
+    # the gathered evidence, and the queries behind it, describe one specific article, so both
+    # caches are dropped as soon as the article changes - a DISARM_LLM instance is reused across
+    # articles when labelling a dataset
+    def evidence_cache(self):
+        if self._evidence_article != self.article_content:
+            self._evidence_cache = {}
+            self._search_cache = {}
+            self._evidence_article = self.article_content
+        return self._evidence_cache
+
     # agentic evidence-gathering step for techniques that require external/OSINT knowledge
     # runs a web_search-equipped agent to research the article's claims BEFORE any classification
     # decision is made, so the final classification call can decide from grounded evidence
     # rather than needing live tool access itself
+    #
+    # findings are cached per article. the batch/taxonomy architectures reach this method once per
+    # tactic group, and without the cache every one of those groups researches the same article
+    # from scratch - re-reading it, re-running overlapping searches and re-deriving the same facts
+    # for a different slice of techniques. here each technique is researched at most once per
+    # article and every later group reads the findings straight back out of the cache
     def gather_evidence(self, techniques_needing_evidence):
         if not techniques_needing_evidence or not self.web_search:
             return None
 
-        evidence_prompt = f"""
-{{
-"Article": {json.dumps(self.article_content)},
-"Techniques": {json.dumps(techniques_needing_evidence, indent=2)}
-}}
-"""
-        if self.debug_log:
-            Log.prompt(f"Evidence Prompt: {evidence_prompt}")
+        cache = self.evidence_cache()
 
-        Log.info("Gathering evidence for techniques requiring external knowledge...")
-        start_time = time.time()
+        outstanding = []
+        queued = set()
+        for tech_entry in techniques_needing_evidence:
+            ex_id = tech_entry["external_id"]
+            if ex_id in cache or ex_id in queued:
+                continue
+            queued.add(ex_id)
+            outstanding.append(tech_entry)
 
-        ids = [t["external_id"].replace("d", ".", 1) for t in techniques_needing_evidence]
-        self._set_task("evidence", "Researching techniques that need outside evidence", external_ids=ids)
-        self._emit(
-            "evidence_started",
-            external_ids=ids,
-            backend="diffbot" if self.local_model else "hosted web_search",
-            max_rounds=self.max_search_rounds,
-        )
+        duration = 0.0
+        if outstanding:
+            cached_count = len(techniques_needing_evidence) - len(outstanding)
+            Log.info(
+                f"Gathering evidence for {len(outstanding)} technique(s) requiring external knowledge"
+                + (f" ({cached_count} already researched for this article)" if cached_count else "")
+            )
+            start_time = time.time()
 
-        if self.local_model:
-            evidence = self.gather_evidence_local(evidence_prompt)
+            ids = [t["external_id"].replace("d", ".", 1) for t in outstanding]
+            self._set_task("evidence", "Researching techniques that need outside evidence", external_ids=ids)
+            self._emit(
+                "evidence_started",
+                external_ids=ids,
+                backend="diffbot" if self.local_model else "hosted web_search",
+                max_rounds=self.max_search_rounds,
+                cached=cached_count,
+            )
+
+            # a very large technique set is researched in batches so no single session has to hold
+            # the whole framework and report on all of it at once. later batches are handed the
+            # findings the earlier ones produced, so they build on that research instead of
+            # repeating it
+            batch_size = self.evidence_batch_size if self.evidence_batch_size > 0 else len(outstanding)
+            for start in range(0, len(outstanding), batch_size):
+                self._check_stop()
+                batch = outstanding[start:start + batch_size]
+                batch_ids = {t["external_id"] for t in batch}
+
+                for report in self.gather_evidence_batch(batch) or []:
+                    if report.get("external_id") in batch_ids:
+                        cache[report["external_id"]] = report
+
+                # a technique the agent skipped has still had its turn - record the miss so the
+                # next tactic group doesn't queue it all over again
+                for tech_entry in batch:
+                    cache.setdefault(tech_entry["external_id"], None)
+
+            duration = round(time.time() - start_time, 2)
+            Log.info("Evidence gathering done in " + str(duration) + " seconds")
         else:
-            evidence = self.gather_evidence_hosted(evidence_prompt)
+            Log.info(f"Reusing evidence already gathered for {len(techniques_needing_evidence)} technique(s)")
 
-        duration = round(time.time() - start_time, 2)
-        Log.info("Evidence gathering done in " + str(duration) + " seconds")
+        evidence = [cache[t["external_id"]] for t in techniques_needing_evidence if cache.get(t["external_id"])]
+
         self._emit(
             "evidence_reported",
             duration=duration,
+            from_cache=not outstanding,
             evidence=[
                 {
                     "external_id": (e.get("external_id") or "").replace("d", ".", 1),
                     "findings": e.get("findings", ""),
                     "sources": e.get("sources", []) or [],
                 }
-                for e in (evidence or [])
+                for e in evidence
             ],
         )
         return evidence
+
+    # researches one batch of techniques against the article
+    # whatever has already been established about this article is passed in as KnownFindings, so
+    # the agent reuses it rather than searching the same ground again for a new set of techniques
+    def gather_evidence_batch(self, techniques):
+        known_findings = [report for report in self.evidence_cache().values() if report]
+
+        prompt_body = {"Article": self.article_content}
+        if known_findings:
+            prompt_body["KnownFindings"] = known_findings
+        prompt_body["Techniques"] = techniques
+
+        evidence_prompt = json.dumps(prompt_body, indent=2)
+
+        if self.debug_log:
+            Log.prompt(f"Evidence Prompt: {evidence_prompt}")
+
+        if self.local_model:
+            return self.gather_evidence_local(evidence_prompt)
+        return self.gather_evidence_hosted(evidence_prompt)
+
+    # collects every technique a run will test that needs OSINT evidence and researches them all
+    # in one pass, up front. the loop-based architectures (batch_clf/taxonomy, single_clf) reach
+    # gather_evidence once per tactic group or per technique, so without this the article is
+    # researched over and over; priming the cache first makes all of those calls cache hits
+    def prefetch_evidence(self, techniques=None):
+        if not self.web_search or self.clf_mode != Mode.INVESTIGATE:
+            return
+
+        if techniques is None:
+            techniques = self.get_all_techniques()
+
+        _, _, techniques_needing_evidence = self.build_technique_entries(techniques)
+        if not techniques_needing_evidence:
+            return
+
+        Log.info(f"Pre-gathering evidence for the whole run: {len(techniques_needing_evidence)} technique(s)")
+        self.gather_evidence(techniques_needing_evidence)
 
     # JSON schema for the evidence report produced by either evidence-gathering path
     def evidence_schema(self):
@@ -864,6 +957,30 @@ class DISARM_LLM:
 
         return evidence_parsed.get("evidence", [])
 
+    # web searches are cached per article. one article is researched for many different
+    # techniques over a run, and the queries that research produces overlap heavily, so caching
+    # by query means Diffbot is asked a given question once per article however many evidence
+    # sessions want the answer
+    # the API merges a batched call's results into one flat list with no attribution, so queries
+    # are issued one at a time to keep the cache exact - this costs more HTTP round trips but the
+    # number of searches billed is the same, and repeats cost nothing at all
+    def cached_web_search(self, queries):
+        self.evidence_cache()  # make sure the caches belong to the current article
+
+        results = []
+        cache_hits = 0
+        for query in queries:
+            key = query.strip().lower()
+            if key in self._search_cache:
+                cache_hits += 1
+            else:
+                self._search_cache[key] = diffbot_web_search([query], size=self.results_per_query)
+            results.extend(self._search_cache[key])
+
+        if cache_hits:
+            Log.search(f"  {cache_hits}/{len(queries)} queries answered from this article's search cache")
+        return results
+
     # local-model evidence gathering
     # the vLLM server has no tool-call parser wired up, so rather than relying on native tool
     # calling the search loop is driven by structured output: each round the model either asks
@@ -898,8 +1015,9 @@ class DISARM_LLM:
             {"role": "system", "content": EVIDENCE_LOCAL_SYS_PROMPT},
             {"role": "user", "content": evidence_prompt}
         ]
-        searched = set()
-
+        # the searched set is shared by every evidence session for this article, so a later batch
+        # never spends a round re-running a query an earlier batch already ran
+        self.evidence_cache()
         for round_num in range(1, self.max_search_rounds + 1):
             self._check_stop()
             # on the final round drop "search" from the enum so the model has to report back
@@ -916,20 +1034,30 @@ class DISARM_LLM:
             except json.JSONDecodeError as e:
                 raise ValueError("Model failed to return valid JSON for evidence gathering") from e
 
-            queries = [q for q in step.get("queries", []) if q.strip().lower() not in searched]
-
-            if step.get("action") != "search" or not queries:
+            # only an explicit report ends the session. a repeated query is answered from the
+            # search cache rather than cutting the session short - bailing out here would throw
+            # away the evidence the session had already gathered
+            if step.get("action") != "search":
                 Log.response(json.dumps(step.get("evidence", []), indent=2))
                 return step.get("evidence", [])
 
+            queries = [q for q in step.get("queries", []) if q and q.strip()]
+
+            if not queries:
+                # asked to search without naming a query - nothing to run, so nudge for a report
+                Log.warn("  Model asked to search without giving any queries")
+                search_reply = {"search_results": [], "error": "No queries were given."}
+                messages.append({"role": "assistant", "content": output})
+                messages.append({"role": "user", "content": json.dumps(search_reply)})
+                continue
+
             Log.search(f"Search round {round_num}/{self.max_search_rounds}: {queries}")
             self._emit("search_round", round=round_num, max_rounds=self.max_search_rounds, queries=queries)
-            searched.update(q.strip().lower() for q in queries)
 
             try:
-                results = diffbot_web_search(queries, size=self.results_per_query)
+                results = self.cached_web_search(queries)
                 search_reply = {"search_results": results}
-                Log.search(f"  {len(results)} results from Diffbot")
+                Log.search(f"  {len(results)} results")
                 self._emit(
                     "search_results",
                     round=round_num,
@@ -959,16 +1087,12 @@ class DISARM_LLM:
 
         return []
 
-    # prompts the model to label the article with the provided techniques
-    # leave techniques param empty to use select_all clf
-    def identify_techniques(self, techniques=None, filter_ids=None):
-        select_all = False
-        if techniques is None:
-            select_all = True
-            techniques = self.get_all_techniques()
-
+    # builds the {external_id, description} entries that the classification and evidence prompts
+    # are given, and picks out the ones that need OSINT evidence gathering
+    # shared by identify_techniques and prefetch_evidence so the two always agree on which
+    # techniques are in scope and need researching
+    def build_technique_entries(self, techniques, filter_ids=None):
         filtered_techniques = []
-
         external_ids = []
         techniques_needing_evidence = []
         for technique in techniques:
@@ -995,6 +1119,18 @@ class DISARM_LLM:
                 if self.clf_mode == Mode.INVESTIGATE and self.web_search:
                     if "Internet/OSINT access" in get_additional_llm_requirements([ex_id]):
                         techniques_needing_evidence.append(tech_entry)
+
+        return filtered_techniques, external_ids, techniques_needing_evidence
+
+    # prompts the model to label the article with the provided techniques
+    # leave techniques param empty to use select_all clf
+    def identify_techniques(self, techniques=None, filter_ids=None):
+        select_all = False
+        if techniques is None:
+            select_all = True
+            techniques = self.get_all_techniques()
+
+        filtered_techniques, external_ids, techniques_needing_evidence = self.build_technique_entries(techniques, filter_ids)
 
         self.available_classes = external_ids
 
@@ -1088,16 +1224,22 @@ class DISARM_LLM:
         return results
     
     # batchClf helper method
-    # prompts the model to label the techniques belonging to a tactic 
-    def identify_techniques_for_tactic(self, tactic, index=None, total=None):
-        self._check_stop()
-        Log.info("Testing for tactic: " + tactic)
+    # returns the technique objects belonging to a tactic
+    def get_techniques_for_tactic(self, tactic):
         techniques = []
         for obj in self.disarm_json["objects"]:
             if obj.get("type") == "attack-pattern":
                 for phase in obj.get("kill_chain_phases", []):
                     if phase.get("phase_name") == tactic:
                         techniques.append(obj)
+        return techniques
+
+    # batchClf helper method
+    # prompts the model to label the techniques belonging to a tactic 
+    def identify_techniques_for_tactic(self, tactic, index=None, total=None):
+        self._check_stop()
+        Log.info("Testing for tactic: " + tactic)
+        techniques = self.get_techniques_for_tactic(tactic)
 
         start_time = time.time()
         self._set_task(
@@ -1264,6 +1406,15 @@ class DISARM_LLM:
             f, tactics = self.get_tactics()
         #TECHNIQUES LOOP
         self._emit("plan", architecture="batch_clf", tactics=list(tactics), fast=fast)
+
+        # research every technique this run will test in one pass, before the per-tactic loop.
+        # the loop below hits gather_evidence once per tactic, and each of those calls would
+        # otherwise research this same article from scratch - see prefetch_evidence
+        run_techniques = []
+        for tactic in tactics:
+            run_techniques.extend(self.get_techniques_for_tactic(tactic))
+        self.prefetch_evidence(run_techniques)
+
         total_techniques = []
         for i, tactic in enumerate(tactics, start=1):
             techniques = self.identify_techniques_for_tactic(tactic, index=i, total=len(tactics))
@@ -1336,6 +1487,9 @@ class DISARM_LLM:
         start_time = time.time() 
         available_techniques = self.get_all_techniques()
         self._emit("plan", architecture="single_clf", technique_count=len(available_techniques))
+
+        # one evidence pass for the whole framework, instead of one per technique prompt
+        self.prefetch_evidence(available_techniques)
         total_techniques = []
         for i, technique in enumerate(available_techniques, start=1):
             self._check_stop()
