@@ -64,6 +64,18 @@
           <small>Include sub-techniques as candidates in every prompt</small></span>
       </label>
 
+      <div id="taxonomyOpts">
+        <label class="check">
+          <input type="checkbox" id="force_local_sub_techniques">
+          <span>Force sub-techniques onto the local model
+            <small>Keeps taxonomy's extra per-technique sub-technique prompt on the local vLLM server even when the main model above is hosted (no-op if the main model is already local)</small></span>
+        </label>
+        <label class="field" id="localSubTechModelField">
+          <span>Local sub-technique model</span>
+          <input type="text" id="local_sub_technique_model" spellcheck="false">
+        </label>
+      </div>
+
       <label class="check">
         <input type="checkbox" id="web_search" checked>
         <span>Gather evidence from the web

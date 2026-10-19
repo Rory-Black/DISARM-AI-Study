@@ -64,6 +64,8 @@ DEFAULT_CONFIG = {
     "web_search": True,
     "max_search_rounds": 4,
     "results_per_query": 5,
+    "force_local_sub_techniques": False,
+    "local_sub_technique_model": "google/gemma-4-26B-A4B-it",
 }
 
 
@@ -77,6 +79,8 @@ def parse_config(payload):
     config["web_search"] = bool(config["web_search"])
     config["max_search_rounds"] = int(config["max_search_rounds"])
     config["results_per_query"] = int(config["results_per_query"])
+    config["force_local_sub_techniques"] = bool(config["force_local_sub_techniques"])
+    config["local_sub_technique_model"] = str(config["local_sub_technique_model"] or "").strip() or None
     if config["architecture"] not in ARCHITECTURES:
         raise ValueError(f"Unknown architecture: {config['architecture']}")
     if config["mode"] not in Mode.__members__:
@@ -214,6 +218,8 @@ def article_run(articles, config):
                 web_search=config["web_search"],
                 max_search_rounds=config["max_search_rounds"],
                 results_per_query=config["results_per_query"],
+                force_local_sub_techniques=config["force_local_sub_techniques"],
+                local_sub_technique_model=config["local_sub_technique_model"],
                 on_event=emit,
                 should_stop=should_stop,
             )
@@ -253,6 +259,8 @@ def dataset_run(config, limit, language, export, cache_path, subset_path):
             web_search=config["web_search"],
             max_search_rounds=config["max_search_rounds"],
             results_per_query=config["results_per_query"],
+            force_local_sub_techniques=config["force_local_sub_techniques"],
+            local_sub_technique_model=config["local_sub_technique_model"],
             limit=limit,
             language=language,
             subset_path=subset_path,

@@ -70,9 +70,12 @@ async function init() {
   $("web_search").checked = defaults.config.web_search;
   $("max_search_rounds").value = defaults.config.max_search_rounds;
   $("results_per_query").value = defaults.config.results_per_query;
+  $("force_local_sub_techniques").checked = defaults.config.force_local_sub_techniques;
+  $("local_sub_technique_model").value = defaults.config.local_sub_technique_model || "";
 
   renderFramework();
   refreshModeHint();
+  refreshTaxonomyOpts();
   refreshDatasetSummary();
   connect();
   setInterval(tick, 500);
@@ -363,7 +366,11 @@ function taskDetail(ev) {
 
 function runSummary(ev) {
   const c = ev.config || {};
-  return `<span class="code">${esc(c.model_name)}</span> · ${esc(c.mode)} · ${esc(c.architecture)} · web search ${c.web_search ? "on" : "off"} · sub-techniques ${c.check_sub_techniques ? "on" : "off"}`;
+  const forcedLocal =
+    c.architecture === "taxonomy" && c.force_local_sub_techniques
+      ? ` · sub-techniques forced local (${esc(c.local_sub_technique_model || "?")})`
+      : "";
+  return `<span class="code">${esc(c.model_name)}</span> · ${esc(c.mode)} · ${esc(c.architecture)} · web search ${c.web_search ? "on" : "off"} · sub-techniques ${c.check_sub_techniques ? "on" : "off"}${forcedLocal}`;
 }
 
 function summariseRun() {
@@ -874,6 +881,16 @@ function refreshModeHint() {
   $("searchOpts").hidden = !$("web_search").checked || mode !== "INVESTIGATE";
 }
 
+$("architecture").addEventListener("change", refreshTaxonomyOpts);
+$("local_model").addEventListener("change", refreshTaxonomyOpts);
+$("force_local_sub_techniques").addEventListener("change", refreshTaxonomyOpts);
+
+function refreshTaxonomyOpts() {
+  const isTaxonomy = $("architecture").value === "taxonomy";
+  $("taxonomyOpts").hidden = !isTaxonomy;
+  $("localSubTechModelField").hidden = !isTaxonomy || $("local_model").checked || !$("force_local_sub_techniques").checked;
+}
+
 async function refreshDatasetSummary() {
   try {
     const s = await fetch("/api/dataset/summary").then((r) => r.json());
@@ -955,6 +972,8 @@ function readConfig() {
     web_search: $("web_search").checked,
     max_search_rounds: Number($("max_search_rounds").value),
     results_per_query: Number($("results_per_query").value),
+    force_local_sub_techniques: $("force_local_sub_techniques").checked,
+    local_sub_technique_model: $("local_sub_technique_model").value.trim() || null,
   };
 }
 
@@ -1242,6 +1261,9 @@ function dbBodyHTML(id, light) {
         `<dt>Architecture</dt><dd class="code">${esc(meta.architecture || "—")}</dd>` +
         `<dt>Web search</dt><dd>${meta.web_search ? "on" : "off"}</dd>` +
         `<dt>Sub-techniques</dt><dd>${meta.check_sub_techniques ? "checked" : "parents only"}</dd>` +
+        (meta.force_local_sub_techniques
+          ? `<dt>Sub-techniques forced local</dt><dd class="code">${esc(meta.local_sub_technique_model || "—")}</dd>`
+          : "") +
         `<dt>Labelled at</dt><dd class="code">${esc(meta.labelled_at || "—")}</dd>` +
         (meta.duration_s ? `<dt>Took</dt><dd>${secs(meta.duration_s)}</dd>` : "") +
         (meta.search_queries?.length

@@ -494,6 +494,8 @@ class DISARM_LLM:
                  max_search_rounds=4,
                  results_per_query=5,
                  evidence_batch_size=30,
+                 force_local_sub_techniques=False,
+                 local_sub_technique_model=None,
                  on_event=None,
                  should_stop=None
                  ):
@@ -513,6 +515,12 @@ class DISARM_LLM:
         self.max_search_rounds = max_search_rounds
         self.results_per_query = results_per_query
         self.evidence_batch_size = evidence_batch_size
+        # taxonomy's sub-technique stage is one extra prompt per parent technique - when the
+        # main classification runs on a hosted model (billed per call) this lets that stage run
+        # against the local vLLM server instead, while the parent-technique classification still
+        # uses the hosted model. No-op when the main model is already local.
+        self.force_local_sub_techniques = force_local_sub_techniques
+        self.local_sub_technique_model = local_sub_technique_model
 
         # per-article evidence caches - see evidence_cache()
         self._evidence_cache = {}
@@ -1318,6 +1326,17 @@ class DISARM_LLM:
 
         self.available_classes = external_ids
 
+        # force_local_sub_techniques lets this one extra prompt per parent technique run
+        # against the local vLLM server even when the parent-technique classification itself
+        # ran on a (billed-per-call) hosted model - a no-op when the main model is already local
+        use_local_override = self.force_local_sub_techniques and not self.local_model
+        original_local_model = self.local_model
+        original_model_name = self.MODEL_NAME
+        if use_local_override:
+            self.local_model = True
+            self.MODEL_NAME = self.local_sub_technique_model or self.MODEL_NAME
+            Log.info(f"Forcing sub-techniques of {parent_id} through the local model ({self.MODEL_NAME})")
+
         st_format = {
             "type": "object",
             "properties": {
@@ -1376,6 +1395,10 @@ class DISARM_LLM:
         except APITimeoutError:
             Log.warn("Model Failed to return result")
             raise
+        finally:
+            if use_local_override:
+                self.local_model = original_local_model
+                self.MODEL_NAME = original_model_name
 
         if not results:
             # the model was asked for at least one sub-technique but gave none - keep the parent
