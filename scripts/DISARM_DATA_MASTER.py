@@ -70,8 +70,8 @@ def get_additional_llm_requirements(external_ids: list):
 class DISARMDataMaster:
     
     def __init__(self, 
-                 frameworkfile = 'DISARM_FRAMEWORKS_MASTER.xlsx', 
-                 datafile = 'DISARM_DATA_MASTER.xlsx',
+                 frameworkfile = Path(__file__).parent.parent / ".data" / 'DISARM_FRAMEWORKS_MASTER.xlsx', 
+                 datafile = Path(__file__).parent.parent / ".data" / 'DISARM_DATA_MASTER.xlsx',
                  commentsfile = 'DISARM_COMMENTS_MASTER.xlsx'):
         
         # Load metadata from file

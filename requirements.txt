@@ -7,3 +7,6 @@ tqdm
 loguru
 scikit-learn
 flask
+suffix_trees
+bs4
+rouge_score
